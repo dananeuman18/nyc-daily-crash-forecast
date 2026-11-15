@@ -13,7 +13,7 @@ University of San Diego, M.S. in Applied Data Science
 Daily police-reported collision records
 Official source: [NYC Open Data](https://data.cityofnewyork.us/Public-Safety/Motor-Vehicle-Collisions-Crashes/h9gi-nx95/about_data)
 
-The full dataset contains more than 2.3 million crash records, one row per police-reported collision, beginning in July 2012 and updated daily. For this project, records are aggregated to daily counts through the NYC Open Data API, so the full raw file does not need to be downloaded or stored in this repository.
+The full dataset contains more than 2.3 million crash records, one row per police-reported collision, beginning in July 2012 and updated daily. The raw file is downloaded once and aggregated to daily counts in R during preprocessing. Because of its size, the raw file is not stored in this repository; it is recreated by running `R/00_download_raw.R`.
 
 Daily series used in the analysis:
 
@@ -28,7 +28,10 @@ Daily series used in the analysis:
 Contributing factor and vehicle type subseries are pulled separately by grouping on `contributing_factor_vehicle_1` and `vehicle_type_code1`.
 
 Supporting data:
-- **Weather:** NOAA daily observations, Central Park station (USW00094728) — precipitation, snowfall, temperature
+Contributing factor and vehicle type (vehicle 1 on each police report) are retained in the raw data for possible subseries; these fields contain many inconsistent labels and require grouping before use.
+
+Planned supporting data:
+- **Weather:** NOAA daily observations, Central Park station (USW00094728)
 - **Holidays and daylight saving time:** indicator variables created in R
 
 ---
@@ -64,19 +67,34 @@ Models are trained on earlier years and evaluated on a held-out test period at t
 ## Repository Structure
 
 ```
-data/        Aggregated daily CSVs (crash counts, weather)
-R/           Analysis scripts, numbered in run order
-figures/     Saved plots
+R/
+  00_download_raw.R       Downloads the raw crash file (run once)
+  01_preprocessing.Rmd    Cleans raw data and builds the daily series
+  02_eda.Rmd              Exploratory data analysis
+  03_arima.qmd            ARIMA / dynamic regression model
+  03_ets.qmd              ETS model
+  03_tslm.qmd             Time series regression model
+data/
+  nyc_daily_crashes.csv   Daily crash series (output of 01_preprocessing)
+  raw/                    Raw download (not tracked by Git)
 README.md
 ```
 
 ## Reproducing the Analysis
 
-1. Run `R/01_pull_data.R` to download the daily aggregated crash counts from the NYC Open Data API.
-2. Run the remaining scripts in `R/` in numbered order.
+1. Run `R/00_download_raw.R` with the working directory set to the project folder (Session > Set Working Directory > To Project Directory). The download is several hundred MB.
+2. Run `R/01_preprocessing.Rmd` to build `data/nyc_daily_crashes.csv`.
+3. Each analysis file loads the daily series with:
 
-Required packages: `fpp3`, `tidyverse`
+```r
+crash_ts <- read.csv("../data/nyc_daily_crashes.csv") |>
+  mutate(day = as.Date(day)) |>
+  as_tsibble(index = day)
+```
 
+Required packages: `fpp3`, `data.table`
+
+Required packages: `fpp3`, `data.table`
 ---
 
 ## Project History
