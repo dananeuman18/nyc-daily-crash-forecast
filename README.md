@@ -65,9 +65,25 @@ Models are trained on earlier years and evaluated on a held-out test period at t
 
 ```
 data/        Aggregated daily CSVs (crash counts, weather)
-R/           Analysis scripts, numbered in run
+R/           Analysis scripts, numbered in run order
+figures/     Saved plots
+README.md
+```
 
-14. References
+## Reproducing the Analysis
+
+1. Run `R/01_pull_data.R` to download the daily aggregated crash counts from the NYC Open Data API.
+2. Run the remaining scripts in `R/` in numbered order.
+
+Required packages: `fpp3`, `tidyverse`
+
+---
+
+## Project History
+
+This project originally forecast U.S. private passenger auto insurance loss ratios. Following instructor feedback, the team changed to the NYC collision dataset. The earlier insurance work is preserved on the `insurance-archive` branch.
+
+### References
 
 Hyndman, R. J., & Athanasopoulos, G. (2021). Forecasting: Principles and Practice (3rd ed.). OTexts.
 
