@@ -1,261 +1,71 @@
-Auto Insurance Loss Ratio Forecasting
+# Forecasting NYC Motor Vehicle Collision Frequency: Multiple Seasonality, Crash Severity, and Implications for Auto Insurance Risk
 
-ADS 506 – Group 2 | Time Series Forecasting Project
+ADS-506 Applied Time Series Analysis — Final Team Project
+University of San Diego, M.S. in Applied Data Science
 
-1. Project Overview
+**Team:** Dana Neuman, Imelda Mendoza, Samuel Scott
 
-This project focuses on analyzing historical auto insurance data and applying time series forecasting techniques to examine trends in annual insurance loss ratios.
+---
 
-The primary objective is to evaluate historical insurance loss patterns, develop forecasting models, and compare their predictive accuracy to identify the most effective approach for forecasting annual auto insurance loss ratios.
+## Dataset
 
-The project uses R and the tidyverts ecosystem to prepare historical insurance datasets, develop forecasting models, evaluate model performance, and communicate findings through statistical analysis and visualizations.
+**NYC Motor Vehicle Collisions – Crashes** (2012–present)
+Daily police-reported collision records
+Official source: [NYC Open Data](https://data.cityofnewyork.us/Public-Safety/Motor-Vehicle-Collisions-Crashes/h9gi-nx95/about_data)
 
-2. Research Objectives
+The full dataset contains more than 2.3 million crash records, one row per police-reported collision, beginning in July 2012 and updated daily. For this project, records are aggregated to daily counts through the NYC Open Data API, so the full raw file does not need to be downloaded or stored in this repository.
 
-The main objectives of this project are to:
+Daily series used in the analysis:
 
-Explore historical annual auto insurance loss ratio trends.
-Prepare, clean, and combine historical insurance datasets.
-Calculate annual industry-level insurance loss ratios.
-Apply different time series forecasting techniques.
-Compare manually specified and automatically selected ARIMA models.
-Evaluate ETS and TSLM forecasting approaches.
-Compare forecasting accuracy using testing data.
-Identify insights that support insurance risk assessment and decision-making.
-3. Dataset Description
+| Series | Description |
+|---|---|
+| `crashes` | Total police-reported collisions |
+| `injured` / `killed` | Persons injured and killed (severity) |
+| `ped_injured` | Pedestrians injured |
+| `cyc_injured` | Cyclists injured |
+| `mot_injured` | Motorists injured |
 
-This project uses two historical auto insurance datasets:
+Contributing factor and vehicle type subseries are pulled separately by grouping on `contributing_factor_vehicle_1` and `vehicle_type_code1`.
 
-Dataset 1: September 2011
-Accident years: 1988–1997
-Observations: 14,600
-Insurance companies: 146
-Dataset 2: December 2025
-Accident years: 1998–2007
-Observations: 13,250
-Insurance companies: 143
+Supporting data:
+- **Weather:** NOAA daily observations, Central Park station (USW00094728) — precipitation, snowfall, temperature
+- **Holidays and daylight saving time:** indicator variables created in R
 
-The datasets contain information about:
+---
 
-Incurred losses
-Cumulative paid losses
-Earned premiums
-Accident years
-Development years
-Development lags
-Insurance company identifiers
+## Problem Statement
 
-The two datasets are standardized and combined to create a historical dataset covering 20 accident years, from 1988 through 2007.
+Motor vehicle collisions contribute significantly to personal injuries, property damage, economic losses, and automobile insurance claims. Understanding and accurately forecasting collision frequency can help improve public safety planning, emergency resource allocation, and the assessment of automobile insurance risk.
 
-Primary Forecasting Variable
+Currently, historical collision records are available through the NYC Open Data Motor Vehicle Collisions dataset, which contains police-reported crash information dating back to 2012. However, daily collision frequency is influenced by multiple factors, including weekly and annual seasonal patterns, weather conditions, holidays, road-user characteristics, and changes in traffic behavior. The substantial change in collision counts following 2020 also presents a potential structural break that may affect forecasting accuracy.
 
-The primary variable is the annual industry-level insurance loss ratio.
+The primary objective of this project is to develop and compare time-series forecasting models for daily motor vehicle collision frequency in New York City. The analysis will investigate multiple seasonal components and examine subseries based on collision severity, road-user involvement, contributing factors, and vehicle types. An additional objective is to investigate whether daylight saving time transitions are associated with changes in collision frequency using dynamic regression while controlling for weather and holiday effects.
 
-The loss ratio is calculated as:
+Forecasting performance will be evaluated using a chronological training and testing framework. The primary success criterion is to outperform the seasonal naive forecasting benchmark on the test dataset, measured using Mean Absolute Error (MAE), with a Mean Absolute Scaled Error (MASE) below one as an additional performance target.
 
-Loss Ratio = (Total Incurred Losses / Total Earned Premiums) × 100
+An inaccurate forecast could lead to inefficient allocation of emergency services, inadequate preparation for periods of elevated collision activity, and misleading assessments of potential automobile insurance exposure. Therefore, the project will emphasize forecasting accuracy, model reliability, and the practical interpretation of the results.
 
-The annual industry loss ratio is calculated using aggregated incurred losses and earned premiums for each accident year.
+---
 
-This approach provides an industry-level measure of incurred losses relative to earned premiums.
+## Methods
 
-4. Research Methodology
+All modeling follows *Forecasting: Principles and Practice* (3rd ed.) using the `fpp3` packages in R.
 
-The project follows a structured time series forecasting workflow:
+- **Benchmark:** Seasonal naive (weekly period)
+- **Time series regression (TSLM):** trend, seasonal dummies, and Fourier terms
+- **ARIMA / dynamic regression:** Fourier terms for annual seasonality, with weather, holiday, and daylight saving time regressors
+- **ETS:** applied to aggregated weekly series as an additional comparison
+- **Structural break:** the post-2020 level shift is handled with an indicator variable and/or a post-break training window
 
-Import and inspect the original insurance datasets.
-Clean and standardize variable names.
-Combine the historical insurance datasets.
-Check missing values and duplicate observations.
-Aggregate annual incurred losses and earned premiums.
-Calculate annual industry insurance loss ratios.
-Convert the annual observations into a time series structure.
-Explore historical trends and time series characteristics.
-Divide the observations into training and testing periods.
-Develop forecasting models.
-Generate forecasts for the testing period.
-Evaluate and compare model performance.
-Interpret the results and communicate business insights.
-5. Forecasting Models
+Models are trained on earlier years and evaluated on a held-out test period at the end of the series.
 
-The project investigates three forecasting approaches.
+---
 
-5.1 ARIMA – Autoregressive Integrated Moving Average
+## Repository Structure
 
-The ARIMA analysis includes:
-
-Manual ARIMA model specification.
-Automatic ARIMA model selection.
-Examination of time series characteristics.
-Forecast generation.
-Forecast accuracy evaluation.
-5.2 ETS – Exponential Smoothing
-
-The ETS analysis focuses on:
-
-Identifying appropriate error, trend, and seasonal components.
-Selecting an appropriate exponential smoothing model.
-Generating forecasts.
-Evaluating predictive performance.
-5.3 TSLM – Time Series Linear Model
-
-The TSLM analysis examines historical trends using regression-based forecasting methods.
-
-The models include:
-
-Linear trend regression.
-Quadratic trend regression.
-Model diagnostics and residual analysis.
-Forecast accuracy evaluation.
-Comparison of original-scale and Box-Cox transformed models, where appropriate.
-6. Training and Testing Data
-
-The combined dataset contains 20 annual observations covering 1988–2007.
-
-The project uses the following data partition:
-
-Dataset	Accident Years	Observations
-Training	1988–2006	19
-Testing	2007	1
-Total	1988–2007	20
-
-The training dataset is used to estimate forecasting models.
-
-The testing observation for 2007 is reserved for evaluating out-of-sample forecasting performance.
-
-All forecasting approaches will use the same training and testing periods to ensure consistent model comparisons.
-
-7. Forecast Accuracy Evaluation
-
-Forecasting models will be evaluated using the following accuracy measures:
-
-Mean Absolute Error (MAE)
-
-Measures the average absolute difference between actual and forecast values.
-
-Root Mean Squared Error (RMSE)
-
-Measures the square root of the average squared forecast errors and penalizes larger forecasting errors.
-
-Mean Absolute Percentage Error (MAPE)
-
-Measures the average absolute forecast error as a percentage of actual values.
-
-For all three measures, lower values indicate better forecasting accuracy.
-
-Because the testing period contains only one annual observation, the accuracy measures should be interpreted cautiously. They represent single-year forecast performance rather than evidence of consistent long-term predictive accuracy.
-
-8. Model Comparison
-
-The project will compare the forecasting performance of:
-
-Manual ARIMA
-Automatic ARIMA
-ETS
-Linear TSLM
-Quadratic TSLM
-Box-Cox transformed TSLM, where appropriate
-
-The final comparison will use consistent testing observations and forecast accuracy measures.
-
-The objective is to identify which forecasting approach produces the most accurate prediction of the 2007 annual industry insurance loss ratio.
-
-9. Tools and Technologies
-
-The project uses the following tools and technologies:
-
-R Programming Language – Statistical analysis and forecasting.
-RStudio / Visual Studio Code – Development environments.
-tidyverse – Data manipulation and visualization.
-tsibble – Time series data structures.
-feasts – Time series features and exploratory analysis.
-fable – Forecasting models.
-fpp3 – Forecasting workflow and supporting functions.
-lubridate – Date and time manipulation.
-ggplot2 – Data visualization.
-GitHub – Version control and team collaboration.
-10. Repository Structure
-
-The repository is organized into the following folders:
-
-text
-auto-insurance-loss-ratio-forecasting/
-│
-├── data/
-│   ├── ppauto_pos_Sep_2011.csv
-│   └── ppauto_pos98-07_Dec_2025.csv
-│
-├── R-scripts/
-│   ├── data_preparation.R
-│   ├── ARIMA_analysis.R
-│   ├── ETS_analysis.R
-│   └── TSLM_analysis.R
-│
-├── plots/
-│   ├── historical_loss_ratio.png
-│   ├── training_testing.png
-│   ├── ARIMA_forecast.png
-│   ├── ETS_forecast.png
-│   └── TSLM_forecast.png
-│
-├── outputs/
-│   ├── annual_industry_loss_ratio.csv
-│   └── forecast_accuracy_comparison.csv
-│
-├── reports/
-│   └── technical_report.docx
-│
-├── presentation/
-│   └── executive_data_story.pptx
-│
-└── README.md
-
-
-Note: The folder and file names above represent the proposed organization. Update them to match the actual repository contents.
-
-11. Team Contributions
-
-Each team member is responsible for a specific forecasting approach while collaborating on the overall project.
-
-Team Member	Responsibility
-Team Member 1	ARIMA modeling and analysis
-Team Member 2	ETS modeling and analysis
-Team Member 3	TSLM modeling and analysis
-
-All team members collaborate on:
-
-Data preparation and validation.
-Exploratory data analysis.
-Model comparison.
-Interpretation of forecasting results.
-Final presentation and technical report.
-12. Final Deliverables
-Deliverable 1 – Executive Data Story Presentation (Module 6)
-
-A presentation communicating the project's major findings, forecasting results, visualizations, and business insights to an executive audience.
-
-Deliverable 2 – Technical Written Report (Module 7)
-
-A detailed technical report documenting:
-
-Dataset description.
-Data preparation and methodology.
-Annual loss ratio calculation.
-Exploratory time series analysis.
-Forecasting model development.
-Forecast accuracy evaluation.
-Model comparison.
-Results and interpretation.
-Conclusions and recommendations.
-13. Project Limitations
-
-The project uses 20 annual observations, with 19 observations for model training and one observation for testing.
-
-The limited sample size presents challenges for identifying long-term patterns and evaluating forecasting performance.
-
-Additionally, a single testing year limits the reliability of model rankings based on forecast accuracy measures.
-
-The findings should therefore be interpreted in the context of the available historical data and forecasting period.
+```
+data/        Aggregated daily CSVs (crash counts, weather)
+R/           Analysis scripts, numbered in run
 
 14. References
 
