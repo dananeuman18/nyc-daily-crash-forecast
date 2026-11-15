@@ -1,0 +1,11 @@
+---
+title: "02.eda"
+output: html_document
+---
+
+```{r}
+crash_ts <- read.csv("../data/nyc_daily_crashes.csv") |>
+  mutate(day = as.Date(day)) |>       # text back to date
+  as_tsibble(index = day)             # back to a time series
+```
+

@@ -1,0 +1,88 @@
+---
+title: "01_preprocessing"
+output: html_document
+---
+
+```{r}
+library(fpp3)
+```
+
+```{r}
+read.csv("../data/raw/crashes_raw.csv", nrows=5) |> names()
+```
+
+```{r}
+# extract only needed columns to limit memory use, then standardize column names
+raw <- data.table::fread(
+  "../data/raw/crashes_raw.csv",
+ select = c("CRASH DATE", "CRASH TIME",
+             "NUMBER OF PERSONS INJURED", "NUMBER OF PERSONS KILLED",
+             "NUMBER OF PEDESTRIANS INJURED", "NUMBER OF CYCLIST INJURED",
+             "NUMBER OF MOTORIST INJURED",
+             "CONTRIBUTING FACTOR VEHICLE 1", "VEHICLE TYPE CODE 1")
+) |> 
+  as_tibble() |> 
+  rename(
+    crash_date   = `CRASH DATE`,
+    crash_time   = `CRASH TIME`,
+    injured      = `NUMBER OF PERSONS INJURED`,
+    killed       = `NUMBER OF PERSONS KILLED`,
+    ped_injured  = `NUMBER OF PEDESTRIANS INJURED`,
+    cyc_injured  = `NUMBER OF CYCLIST INJURED`,
+    mot_injured  = `NUMBER OF MOTORIST INJURED`,
+    factor       = `CONTRIBUTING FACTOR VEHICLE 1`,
+    vehicle_type = `VEHICLE TYPE CODE 1`
+  )
+dim(raw)
+head(raw)
+```
+
+
+```{r}
+# format dates, group crashes by day, then count crashes and sum injuries/deaths per day
+crash_ts <- raw |> 
+  mutate(crash_date = as.Date(crash_date, format = "%m/%d/%Y")) |> 
+  group_by(day = crash_date) |> 
+  summarise(
+    crashes     = n(),
+    injured     = sum(injured, na.rm = TRUE),
+    killed      = sum(killed, na.rm = TRUE),
+    ped_injured = sum(ped_injured, na.rm = TRUE),
+    cyc_injured = sum(cyc_injured, na.rm = TRUE),
+    mot_injured = sum(mot_injured, na.rm = TRUE)
+  ) |> 
+  as_tsibble(index = day)
+
+autoplot(crash_ts)
+```
+
+```{r}
+# check missing values in raw data
+colSums(is.na(raw))
+```
+
+```{r}
+# check date range
+range(crash_ts$day)
+```
+
+```{r}
+# check for missing days in the series
+has_gaps(crash_ts)
+```
+
+```{r}
+# observe the most recent days
+tail(crash_ts, 10)
+```
+
+```{r}
+# plot daily crashes
+autoplot(crash_ts, crashes)
+```
+
+```{r}
+# save daily series
+write.csv(crash_ts, "../data/nyc_daily_crashes.csv", row.names = FALSE)
+```
+
