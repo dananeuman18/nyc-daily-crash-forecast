@@ -1,3 +1,1169 @@
+
+---
+title: "NYC Motor Vehicle Collisions"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+
+library(fpp3)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+```{r create-directory}
+
+dir.create(
+  "C:/
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+```
+## R Markdown
+
+1. Introduction
+
+This report presents the data preprocessing and exploratory data analysis (EDA) of the New York City Motor Vehicle Collisions dataset.
+
+The purpose of this analysis is to understand collision patterns, identify trends over time, examine geographical differences across NYC boroughs, and investigate the contributing factors associated with motor vehicle collisions.
+
+The main objectives are:
+
+Import and clean the raw collision dataset.
+Aggregate collision records into daily observations.
+Examine missing values and data quality.
+Analyze daily and annual collision patterns.
+Compare collision counts across NYC boroughs.
+Identify the most frequently reported contributing factors.
+Examine injuries and fatalities among different road-user groups.
+Prepare processed datasets for subsequent time-series analysis and forecasting.
+
+
+```{r import-crashes, message=FALSE}
+
+raw <- data.table::fread(
+  "C:Assignment/data/Motor_Vehicle_Collisions_-_Crashes_20261114.csv",
+  select = c(
+    "COLLISION_ID",
+    "CRASH DATE",
+    "CRASH TIME",
+    "NUMBER OF PERSONS INJURED",
+    "NUMBER OF PERSONS KILLED",
+    "NUMBER OF PEDESTRIANS INJURED",
+    "NUMBER OF CYCLIST INJURED",
+    "NUMBER OF MOTORIST INJURED",
+    "CONTRIBUTING FACTOR VEHICLE 1",
+    "VEHICLE TYPE CODE 1"
+  )
+) |>
+  as_tibble() |>
+  rename(
+    collision_id = COLLISION_ID,
+    crash_date = `CRASH DATE`,
+    crash_time = `CRASH TIME`,
+    injured = `NUMBER OF PERSONS INJURED`,
+    killed = `NUMBER OF PERSONS KILLED`,
+    ped_injured = `NUMBER OF PEDESTRIANS INJURED`,
+    cyc_injured = `NUMBER OF CYCLIST INJURED`,
+    mot_injured = `NUMBER OF MOTORIST INJURED`,
+    factor = `CONTRIBUTING FACTOR VEHICLE 1`,
+    vehicle_type = `VEHICLE TYPE CODE 1`
+  )
+
+# Check imported data
+dim(raw)
+names(raw)
+head(raw)
+```
+
+
+```{r import-vehicles, message=FALSE}
+
+vehicles_raw <- data.table::fread(
+  "C:/Motor_Vehicle_Collisions_-_Vehicles_20261115.csv",
+  showProgress = FALSE
+)
+
+# Inspect dataset
+dim(vehicles_raw)
+
+# Display column names
+names(vehicles_raw)
+
+# Preview records
+head(vehicles_raw)
+```
+### 3.2 Inspect Raw Data
+
+Examine the dimensions and first six observations of the imported collision dataset.
+
+```{r inspect-raw-data}
+
+# Dataset dimensions
+dim(raw)
+
+# First six observations
+head(raw)
+
+```
+
+The dataset dimensions indicate the number of collision records and variables selected for analysis. The first six observations provide an initial view of the data structure and variable values.
+4. Data Quality Assessment
+
+Before performing the analysis, the dataset is examined for missing values and date coverage.
+
+### 4.1 Missing Values
+
+Check the number of missing observations in each variable of the raw collision dataset.
+
+```{r missing-values}
+
+# Count missing observations in each variable
+colSums(is.na(raw))
+
+```
+
+Missing values are examined to assess data quality before aggregating collision records into daily observations.
+
+
+### 4.2 Prepare and Aggregate Daily Collision Data
+
+Collision records were aggregated into daily observations to construct a time series suitable for subsequent forecasting. Each collision was counted once using its unique collision record. Injury and fatality counts were calculated separately for each day, with missing values excluded from the corresponding totals.
+
+```{r daily-aggregation, message=FALSE, warning=FALSE}
+
+# Convert variables to appropriate formats
+raw <- raw |>
+  mutate(
+    crash_date = as.Date(crash_date, format = "%m/%d/%Y"),
+    across(
+      c(injured, killed, ped_injured, cyc_injured, mot_injured),
+      as.numeric
+    )
+  )
+
+# Aggregate collision records by day
+crash_ts <- raw |>
+  filter(!is.na(crash_date)) |>
+  group_by(day = crash_date) |>
+  summarise(
+    crashes = n(),
+    injured = sum(injured, na.rm = TRUE),
+    killed = sum(killed, na.rm = TRUE),
+    ped_injured = sum(ped_injured, na.rm = TRUE),
+    cyc_injured = sum(cyc_injured, na.rm = TRUE),
+    mot_injured = sum(mot_injured, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  as_tsibble(index = day)
+
+# Inspect the daily time series
+head(crash_ts)
+
+# Dataset dimensions
+dim(crash_ts)
+
+# Date range
+range(crash_ts$day)
+
+# Check regularity
+is_regular(crash_ts)
+
+# Check for gaps
+has_gaps(crash_ts)
+```
+#Interpretation
+The daily aggregation produced a structured time-series dataset containing collision counts, total injuries, fatalities, pedestrian injuries, cyclist injuries, and motorist injuries. Each row represents one calendar day, with collision records summarized using daily totals.
+
+An initial inspection of the first six observations demonstrates variation in daily collision frequency and injury outcomes. For example, July 3, 2012, recorded 664 collisions and 210 injuries, while July 4, 2012, recorded 432 collisions and 156 injuries.
+
+The resulting dataset provides a consistent daily structure for examining historical collision patterns, identifying potential trends and seasonal variations, and developing forecasting models.
+
+### 4.3 Missing Date Investigation
+
+
+```{r missing-date-investigation, message=FALSE}
+
+# Generate complete calendar
+calendar <- tibble(
+  day = seq(
+    min(crash_ts$day),
+    max(crash_ts$day),
+    by = "day"
+  )
+)
+
+# Identify missing dates
+missing_dates <- calendar |>
+  anti_join(
+    crash_ts |> as_tibble() |> select(day),
+    by = "day"
+  )
+
+# Summarize date coverage
+date_coverage <- tibble(
+  Expected_Days = nrow(calendar),
+  Observed_Days = nrow(crash_ts),
+  Missing_Days = nrow(missing_dates),
+  Coverage_Percent = round(
+    nrow(crash_ts) / nrow(calendar) * 100,
+    2
+  )
+)
+
+# Display date coverage summary
+date_coverage
+
+# Display missing dates
+missing_dates
+
+```
+```{r}
+# A tibble: 0 x 1
+```
+
+The date range provides an overview of the observation period covered by the dataset.
+# Overall daily Statistics
+```{r daily-summary-statistics}
+
+# Summary statistics for daily collisions
+summary(crash_ts$crashes)
+
+# Summary statistics for injuries
+summary(crash_ts$injured)
+
+# Summary statistics for fatalities
+summary(crash_ts$killed)
+
+# Average daily collision count
+mean(crash_ts$crashes)
+
+# Average daily injury count
+mean(crash_ts$injured)
+```
+#Interpretation
+#Daily collisions
+
+The average was approximately 439 collisions per day.
+
+The median was 441, very close to the mean.
+
+Half of the daily observations had between 264 and 603 collisions.
+
+The maximum daily count was 1,161 collisions.
+
+#Daily injuries
+
+An average of approximately 149 people were injured per day.
+
+The median was 149 injuries.
+
+Daily injuries ranged from 21 to 311.
+
+The mean and median are very close, suggesting that the central portion of the distribution is relatively balanced.
+
+#Daily fatalities
+
+The average was approximately 0.71 fatalities per day.
+
+The median was zero, indicating that at least half of the days recorded no fatalities.
+
+The maximum was 10 fatalities in a single day.
+
+The difference between the mean and median suggests a distribution with occasional higher-fatality days.
+
+# Summary Statistics of Daily Collision Data
+
+Descriptive statistics were calculated to examine the distribution of daily collisions, injuries, and fatalities over the study period.
+
+The dataset recorded an average of approximately 439 motor vehicle collisions per day, with a median of 441. Daily collision counts ranged from 94 to 1,161. The middle 50% of observations fell between 264 and 603 collisions.
+
+For injuries, the average daily count was approximately 149, with a median of 149. Daily injury counts ranged from 21 to 311.
+
+Fatality counts exhibited a different distribution. The average was approximately 0.71 fatalities per day, while the median was zero. This indicates that at least half of the observed days recorded no fatalities. The maximum daily fatality count was 10.
+
+Overall, the descriptive statistics indicate substantial variation in daily collision and injury counts. Fatalities were less frequent and exhibited a distribution characterized by many zero-fatality days and occasional higher counts. These characteristics should be considered when selecting appropriate time-series forecasting models.
+### 4.4 Examine Time Series Coverage
+
+```{r daily-collision-trend, fig.width=12, fig.height=6}
+
+ggplot(
+  as_tibble(crash_ts),
+  aes(x = day, y = crashes)
+) +
+  geom_line(
+    color = "steelblue",
+    linewidth = 0.3
+  ) +
+  geom_smooth(
+    method = "loess",
+    color = "red",
+    se = FALSE
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "Daily NYC Motor Vehicle Collisions",
+    subtitle = "July 2012 – November 2026",
+    x = "Date",
+    y = "Daily Collision Count"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray40")
+  )
+
+```
+#4.5 Daily Collision Trends and the 2020 Slowdown
+
+The daily collision trend visualization reveals a noticeable slowdown in recorded motor vehicle collisions around 2020. This period coincides with the COVID-19 pandemic, when public health restrictions, reduced commuting, remote work, and changes in travel behavior affected transportation activity in New York City.
+
+The observed decline may reflect reduced traffic exposure and changes in travel patterns during the pandemic. However, the visualization alone does not establish the cause of the decline.
+
+This period is particularly important for the subsequent time-series analysis because it represents a potential structural disruption in the historical collision data. Its influence on long-term trends, seasonal patterns, and forecasting performance should therefore be investigated further.
+
+```{r covid-annual-comparison}
+
+# Calculate annual collision totals
+covid_comparison <- crash_ts |>
+  as_tibble() |>
+  mutate(year = lubridate::year(day)) |>
+  filter(year >= 2017, year <= 2025) |>
+  group_by(year) |>
+  summarise(
+    total_crashes = sum(crashes),
+    average_daily_crashes = mean(crashes),
+    .groups = "drop"
+  ) |>
+  mutate(
+    percent_change = round(
+      (average_daily_crashes /
+         lag(average_daily_crashes) - 1) * 100,
+      2
+    )
+  )
+
+# Display annual comparison
+covid_comparison
+```
+#Interpretation of Annual Collision Trends
+
+The annual collision analysis reveals a substantial downward trend in recorded motor vehicle collisions between 2018 and 2025.
+
+During 2017 and 2018, collision frequency remained relatively stable, with approximately 633–634 collisions recorded per day. However, a decline began in 2019, when average daily collisions decreased by 8.67%.
+
+The most significant change occurred in 2020, when average daily collisions declined by 46.75%, from approximately 579 to 309. This substantial reduction coincides with the COVID-19 pandemic and associated changes in transportation and commuting patterns.
+
+Following 2020, collision frequency continued to decline. Average daily collisions decreased from approximately 303 in 2021 to 234 in 2025. Compared with 2018, the average daily collision count in 2025 was approximately 63.1% lower.
+
+These findings suggest that the decline in collision frequency was not limited to the initial pandemic period. The continued decreases after 2020 indicate a longer-term change in the recorded collision patterns.
+
+Further investigation is necessary to determine the extent to which these changes reflect differences in traffic exposure, transportation behavior, road safety conditions, and reporting practices.
+
+```{r annual-trend, fig.width=11, fig.height=6}
+
+ggplot(
+  covid_comparison,
+  aes(x = year, y = average_daily_crashes)
+) +
+  geom_line(
+    color = "steelblue",
+    linewidth = 1
+  ) +
+  geom_point(
+    color = "darkred",
+    size = 2.5
+  ) +
+  geom_vline(
+    xintercept = 2020,
+    linetype = "dashed",
+    color = "red"
+  ) +
+  scale_x_continuous(
+    breaks = 2017:2025
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "Average Daily NYC Motor Vehicle Collisions by Year",
+    subtitle = "Annual trends and the 2020 pandemic period",
+    x = "Year",
+    y = "Average Daily Collisions"
+  )+
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+Missing dates should be investigated before forecasting.
+
+If the gaps represent days without recorded collisions, they can be filled with zeros. However, gaps caused by incomplete data collection should not automatically be treated as zero collisions.
+
+```{r}
+raw <- raw %>%
+  mutate(
+    crash_date = as.Date(crash_date, format = "%m/%d/%Y")
+  )
+
+# Check date range
+range(raw$crash_date, na.rm = TRUE)
+
+# Count total records and unique dates
+raw %>%
+  summarise(
+    total_crashes = n(),
+    unique_dates = n_distinct(crash_date),
+    first_date = min(crash_date, na.rm = TRUE),
+    last_date = max(crash_date, na.rm = TRUE)
+  )
+```
+```{r}
+# Generate complete calendar
+calendar <- tibble(
+  crash_date = seq(
+    as.Date("2012-07-01"),
+    as.Date("2026-11-11"),
+    by = "day"
+  )
+)
+
+# Identify dates without recorded collisions
+missing_dates <- calendar %>%
+  anti_join(
+    distinct(raw, crash_date),
+    by = "crash_date"
+  )
+
+# Summary
+cat("Expected calendar days:", nrow(calendar), "\n")
+cat("Observed unique dates:", n_distinct(raw$crash_date), "\n")
+cat("Missing dates:", nrow(missing_dates), "\n")
+
+# Display missing dates
+print(missing_dates, n = 50)
+```
+
+#Missing Date Investigation
+
+An investigation of the NYC Motor Vehicle Collisions dataset was conducted to determine whether any calendar dates were missing between July 1, 2012, and November 11, 2026.
+
+The dataset contains 2,305,424 collision records across 5,247 unique calendar dates. A comparison between the complete calendar sequence and the observed crash dates identified zero missing dates.
+
+Therefore, the dataset has 100% calendar-date coverage over the study period. No missing calendar dates were identified, and no date imputation was necessary for the daily collision analysis.
+
+This finding confirms continuity of the recorded dates but does not establish that all collisions occurring during the period were reported.
+The plot provides an overview of daily collision fluctuations and may reveal unusual spikes, long-term changes, and recurring patterns.
+#4.6 Weekly Collision Patterns
+```{r weekly-collision-analysis}
+
+# Calculate daily averages by weekday
+weekly_crashes <- crash_ts |>
+  as_tibble() |>
+  mutate(
+    weekday = weekdays(day),
+    weekday = factor(
+      weekday,
+      levels = c(
+        "Monday", "Tuesday", "Wednesday",
+        "Thursday", "Friday", "Saturday", "Sunday"
+      )
+    )
+  ) |>
+  group_by(weekday) |>
+  summarise(
+    average_crashes = mean(crashes),
+    total_crashes = sum(crashes),
+    .groups = "drop"
+  )
+
+# Display results
+weekly_crashes
+```
+
+**Step 2. Visualize weekly collision patterns**
+
+```{r weekly-collision-plot, fig.width=10, fig.height=6}
+
+ggplot(
+  weekly_crashes,
+  aes(x = weekday, y = average_crashes)
+) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "Average NYC Motor Vehicle Collisions by Day",
+    subtitle = "Comparison of weekday and weekend collision patterns",
+    x = "Day of the Week",
+    y = "Average Daily Collisions"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+#Interpretation of Weekly Collision Patterns
+
+The weekly collision analysis reveals differences in motor vehicle collision frequency across the seven days of the week.
+
+Friday recorded the highest average number of collisions, approaching 500 per day. In contrast, Sunday recorded the lowest average, falling below 400 collisions per day. The remaining days generally recorded more than 400 daily collisions.
+
+These findings suggest that collision activity is relatively higher during weekdays, potentially reflecting commuting patterns, traffic volume, and other transportation activities. The lower collision frequency observed on Sundays may be associated with reduced commuting activity and differences in weekend travel behavior.
+
+The results indicate a potential weekly seasonal pattern in NYC motor vehicle collisions. This pattern should be considered when developing daily time-series forecasting models, particularly when evaluating models that account for weekly seasonality.
+
+```{r weekday-weekend-comparison}
+
+weekday_comparison <- crash_ts |>
+  as_tibble() |>
+  mutate(
+    day_type = if_else(
+      lubridate::wday(day, week_start = 1) >= 6,
+      "Weekend",
+      "Weekday"
+    )
+  ) |>
+  group_by(day_type) |>
+  summarise(
+    average_crashes = mean(crashes),
+    median_crashes = median(crashes),
+    total_crashes = sum(crashes),
+    .groups = "drop"
+  )
+
+weekday_comparison
+```
+#Weekday versus Weekend Collision Analysis
+
+A comparison of weekday and weekend collision frequency reveals a noticeable difference in recorded motor vehicle collisions across the two periods.
+
+Weekdays recorded an average of 457.31 collisions per day, compared with 394.55 collisions per day on weekends. This represents an average difference of approximately 62.77 collisions per day, with weekday collision frequency approximately 15.9% higher than weekend collision frequency.
+
+The median daily collision count was also higher on weekdays (479.5) than on weekends (406). These findings suggest that collision activity is generally higher during the working week than during weekends.
+
+The difference may be associated with commuting patterns, traffic exposure, and variations in transportation activity throughout the week. However, further analysis would be required to establish the underlying causes.
+
+Overall, the results provide evidence of weekly variation in NYC motor vehicle collision frequency. This pattern should be considered when selecting and evaluating forecasting models for daily collision counts.
+
+```{r weekday-weekend-plot, fig.width=9, fig.height=5}
+
+ggplot(
+  weekday_comparison,
+  aes(x = day_type, y = average_crashes, fill = day_type)
+) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = round(average_crashes, 1)),
+    vjust = -0.5,
+    size = 5
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Weekday" = "steelblue",
+      "Weekend" = "darkorange"
+    )
+  ) +
+  labs(
+    title = "Average Daily Collisions: Weekdays vs. Weekends",
+    x = "Day Type",
+    y = "Average Daily Collisions"
+  ) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+## 5. Where we stand in your EDA
+
+You have now identified three important characteristics of your dataset:
+
+1. **Date coverage:** 100% of calendar dates are represented.
+2. **Long-term trend:** A substantial decline in collisions occurred around 2020, followed by continued decreases.
+3. **Weekly patterns:** Fridays have the highest average collision frequency, while Sundays have the lowest. Weekdays average approximately 15.9% more collisions than weekends.
+
+#6. Annual Collision Analysis
+
+This section examines how collision counts vary across years.
+
+The full raw dataset is imported because annual and borough analyses require variables that were not included in the smaller daily time-series dataset.
+
+6.1 Import Full Dataset
+```{r full-data, message=FALSE, warning=FALSE}
+
+# Import complete NYC collision dataset
+
+collisions <- data.table::fread(
+  "C:/Users/newer/OneDrive/Desktop/ADS 506/Final Assignment/data/Motor_Vehicle_Collisions_-_Crashes_20261114.csv"
+)
+
+# Check dataset dimensions
+dim(collisions)
+
+# Inspect first six observations
+head(collisions)
+
+```
+
+```{r extract-year}
+
+# Convert crash dates into Date format
+collisions$CRASH_DATE <- as.Date(
+  collisions[["CRASH DATE"]],
+  format = "%m/%d/%Y"
+)
+
+# Extract year
+crash_year <- format(
+  collisions$CRASH_DATE,
+  "%Y"
+)
+
+# Remove missing years
+crash_year <- crash_year[
+  !is.na(crash_year)
+]
+
+# Check extracted years
+head(crash_year)
+
+# Display year range
+range(crash_year)
+
+```
+
+6.3 Calculate Annual Collision Counts
+```{r annual-counts}
+
+# Extract crash year
+crash_year <- format(
+  collisions$CRASH_DATE,
+  "%Y"
+)
+
+# Remove missing years
+crash_year <- crash_year[
+  !is.na(crash_year)
+]
+
+# Calculate annual collision counts
+yearly_data <- as.data.frame(
+  table(crash_year)
+)
+
+names(yearly_data) <- c(
+  "Year",
+  "Collisions"
+)
+
+yearly_data$Collisions <- as.numeric(
+  as.character(yearly_data$Collisions)
+)
+
+# Display annual summary
+yearly_data
+
+```
+# Display annual collision summary
+
+```{r annual-plot, fig.width=12, fig.height=6}
+
+ggplot(
+  yearly_data,
+  aes(x = Year, y = Collisions)
+) +
+  geom_col(fill = "steelblue") +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "NYC Motor Vehicle Collisions by Year",
+    subtitle = "Annual collision frequency",
+    x = "Year",
+    y = "Number of Collisions"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+This visualization helps identify years with higher or lower collision counts.
+
+7. Collision Analysis by Borough
+
+This section examines the geographical distribution of motor vehicle collisions across New York City's five boroughs.
+
+### 7.1 Calculate Borough Collision Counts
+
+First, missing borough information is included to assess the completeness of geographical data.
+
+```{r borough-counts-all}
+
+# Count collisions, including missing borough information
+borough_counts_all <- table(
+  collisions[["BOROUGH"]],
+  useNA = "ifany"
+)
+
+# Sort counts in descending order
+sort(
+  borough_counts_all,
+  decreasing = TRUE
+)
+
+```
+
+For the borough comparison, observations with missing borough information are excluded.
+
+```{r borough-counts}
+
+# Calculate collision counts by borough
+borough_counts <- sort(
+  table(
+    collisions[["BOROUGH"]],
+    useNA = "no"
+  ),
+  decreasing = TRUE
+)
+
+# Display borough counts
+borough_counts
+
+```
+borough_counts
+
+### 7.2 Create Borough Summary Table
+
+Organize the borough collision counts into a data frame for further analysis and visualization.
+
+```{r borough-summary}
+
+# Create borough summary table
+borough_summary <- data.frame(
+  Borough = names(borough_counts),
+  Collision_Count = as.numeric(borough_counts)
+)
+
+# Display summary
+borough_summary
+
+```
+
+## 2. Collisions by borough
+
+
+```{r borough-plot, fig.width=10, fig.height=6}
+
+# Include missing borough values for data quality assessment
+borough_counts_all <- table(
+  collisions[["BOROUGH"]],
+  useNA = "ifany"
+)
+
+sort(borough_counts_all, decreasing = TRUE)
+
+# Exclude missing borough values for visualization
+borough_counts <- sort(
+  table(
+    collisions[["BOROUGH"]],
+    useNA = "no"
+  ),
+  decreasing = TRUE
+)
+
+# Create summary dataframe
+borough_summary <- data.frame(
+  Borough = names(borough_counts),
+  Collision_Count = as.numeric(borough_counts)
+)
+
+# Create plot
+ggplot(
+  borough_summary,
+  aes(
+    x = reorder(Borough, Collision_Count),
+    y = Collision_Count
+  )
+) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "NYC Motor Vehicle Collisions by Borough",
+    subtitle = "Comparison of recorded collision counts",
+    x = "Borough",
+    y = "Number of Collisions"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14)
+  )
+
+```
+
+
+The visualization compares collision counts across the five boroughs and highlights geographical differences in recorded collision frequency.
+
+8. Contributing Factor Analysis
+
+This section investigates the contributing factors recorded in the collision dataset.
+
+The analysis focuses on the first contributing factor reported for each collision.
+
+### 8.1 Calculate Contributing Factor Frequencies
+
+Calculate the frequency of reported contributing factors associated with Vehicle 1. Missing values are excluded, and the results are sorted in descending order.
+
+```{r factor-counts}
+
+factor_counts <- sort(
+  table(
+    collisions[["CONTRIBUTING FACTOR VEHICLE 1"]],
+    useNA = "no"
+  ),
+  decreasing = TRUE
+)
+
+head(factor_counts, 15)
+
+```
+# Display the 15 most frequent factors
+
+head(factor_counts, 15)
+
+### 8.2 Remove Unspecified Categories
+
+Missing values, "Unspecified", and "Does Not Apply" are excluded to focus on specified contributing factors.
+
+```{r clean-factor-counts}
+
+factor_counts_clean <- sort(
+  table(
+    collisions[["CONTRIBUTING FACTOR VEHICLE 1"]][
+      !is.na(collisions[["CONTRIBUTING FACTOR VEHICLE 1"]]) &
+        !collisions[["CONTRIBUTING FACTOR VEHICLE 1"]] %in%
+        c("Unspecified", "Does Not Apply")
+    ]
+  ),
+  decreasing = TRUE
+)
+
+head(factor_counts_clean, 15)
+
+```
+
+### 8.3 Create Contributing Factor Summary
+
+Calculate the total number and percentage of collisions associated with each specified contributing factor.
+
+```{r factor-summary}
+
+factor_summary <- data.frame(
+  Contributing_Factor = names(factor_counts_clean),
+  Collision_Count = as.numeric(factor_counts_clean)
+)
+
+factor_summary$Percentage <- round(
+  factor_summary$Collision_Count /
+    sum(factor_counts_clean) * 100,
+  2
+)
+
+head(factor_summary, 15)
+
+```
+
+The summary table provides the frequency and percentage distribution of specified contributing factors. These results help identify the most frequently reported factors associated with NYC motor vehicle collisions.
+
+
+8.4 Visualize the Top 15 Contributing Factors
+
+## 3. Contributing factors
+
+
+```{r factor-plot, fig.width=12, fig.height=7}
+
+top_factors <- head(factor_summary, 15)
+
+ggplot(
+  top_factors,
+  aes(
+    x = reorder(Contributing_Factor, Collision_Count),
+    y = Collision_Count
+  )
+) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Top 15 Contributing Factors in NYC Collisions",
+    x = "Contributing Factor",
+    y = "Number of Collisions"
+  )
+```
+The chart highlights the most frequently reported contributing factors.
+
+These results describe recorded associations and should not be interpreted as evidence of causation.
+
+9. Injury and Fatality Analysis
+
+This section examines the number of people injured and killed in motor vehicle collisions.
+
+### 9.1 Daily Injuries and Fatalities
+
+```{r daily-injuries-fatalities}
+
+crash_ts |>
+  as_tibble() |>
+  ggplot(aes(x = day)) +
+  geom_line(
+    aes(y = injured, color = "Injuries"),
+    linewidth = 0.5
+  ) +
+  geom_line(
+    aes(y = killed, color = "Fatalities"),
+    linewidth = 0.5
+  ) +
+  scale_color_manual(
+    values = c(
+      "Injuries" = "steelblue",
+      "Fatalities" = "red"
+    )
+  ) +
+  labs(
+    title = "Daily Injuries and Fatalities in NYC",
+    x = "Date",
+    y = "Number of People",
+    color = "Category"
+  )
+
+```
+
+The following visualization compares daily injury and fatality counts in NYC.
+
+```{r injury-fatality-plot, fig.width=12, fig.height=6}
+
+crash_ts |>
+  as_tibble() |>
+  ggplot(
+    aes(x = day)
+  ) +
+  geom_line(
+    aes(
+      y = injured,
+      color = "Injuries"
+    ),
+    linewidth = 0.5
+  ) +
+  geom_line(
+    aes(
+      y = killed,
+      color = "Fatalities"
+    ),
+    linewidth = 0.5
+  ) +
+  scale_color_manual(
+    values = c(
+      "Injuries" = "steelblue",
+      "Fatalities" = "red"
+    )
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "Daily Injuries and Fatalities in NYC",
+    x = "Date",
+    y = "Number of People",
+    color = "Category"
+  )+
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+```
+The visualization compares the daily number of injuries and fatalities recorded in the dataset.
+
+Because injury counts are generally much higher than fatality counts, the fatality series may appear close to zero on the same scale.
+
+## 9.2 Injuries by Road User Type
+
+The dataset distinguishes between pedestrian, cyclist, and motorist injuries.
+
+The following visualization compares daily injury patterns across these three road-user categories.
+
+```{r road-user-injury-plot, fig.width=12, fig.height=6}
+
+# Reshape injury data
+injury_data <- crash_ts |>
+  as_tibble() |>
+  select(day, ped_injured, cyc_injured, mot_injured) |>
+  pivot_longer(
+    cols = -day,
+    names_to = "Road_User",
+    values_to = "Injuries"
+  )
+
+# Create visualization
+ggplot(
+  injury_data,
+  aes(x = day, y = Injuries, color = Road_User)
+) +
+  geom_line(linewidth = 0.5) +
+  scale_color_manual(
+    values = c(
+      "ped_injured" = "darkorange",
+      "cyc_injured" = "forestgreen",
+      "mot_injured" = "steelblue"
+    ),
+    labels = c(
+      "ped_injured" = "Pedestrians",
+      "cyc_injured" = "Cyclists",
+      "mot_injured" = "Motorists"
+    )
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
+  labs(
+    title = "Daily Injuries by Road User Type",
+    subtitle = "Pedestrian, cyclist, and motorist injuries in NYC",
+    x = "Date",
+    y = "Number of Injuries",
+    color = "Road User"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "bottom"
+  )
+
+```
+
+This plot helps compare injury patterns among pedestrians, cyclists, and motorists.
+
+10. Export Processed Datasets
+
+The processed datasets are exported to CSV files for use in subsequent statistical analysis and forecasting.
+
+
+### 10.2 Export Daily Collision Time Series
+
+```{r export-daily}
+
+write.csv(
+  as.data.frame(crash_ts),
+  "C:/Users/newer/OneDrive/Desktop/ADS 506/Final Assignment/data/processed/nyc_daily_crashes.csv",
+  row.names = FALSE
+)
+
+```
+### 10.3 Export Annual Collision Summary
+
+```{r export-yearly}
+
+write.csv(
+  yearly_data,
+  "C:/Users/newer/OneDrive/Desktop/ADS 506/Final Assignment/data/processed/nyc_yearly_crashes.csv",
+  row.names = FALSE
+)
+
+```
+
+### 10.4 Export Borough Summary
+
+```{r export-borough}
+
+write.csv(
+  borough_summary,
+  "C:/Users/newer/OneDrive/Desktop/ADS 506/Final Assignment/data/processed/nyc_borough_summary.csv",
+  row.names = FALSE
+)
+
+```
+### 10.5 Export Contributing Factor Summary
+
+```{r export-factors}
+
+write.csv(
+  factor_summary,
+  "C:/processed/contributing_factor_summary.csv",
+  row.names = FALSE
+)
+```
+
+```{r daily-aggregation, message=FALSE}
+
+crash_ts <- raw |>
+  mutate(
+    crash_date = as.Date(crash_date, format = "%m/%d/%Y"),
+    injured = as.numeric(injured),
+    killed = as.numeric(killed),
+    ped_injured = as.numeric(ped_injured),
+    cyc_injured = as.numeric(cyc_injured),
+    mot_injured = as.numeric(mot_injured)
+  ) |>
+  filter(!is.na(crash_date)) |>
+  group_by(day = crash_date) |>
+  summarise(
+    crashes = n(),
+    injured = sum(injured, na.rm = TRUE),
+    killed = sum(killed, na.rm = TRUE),
+    ped_injured = sum(ped_injured, na.rm = TRUE),
+    cyc_injured = sum(cyc_injured, na.rm = TRUE),
+    mot_injured = sum(mot_injured, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  as_tsibble(index = day)
+
+# Inspect daily time series
+head(crash_ts)
+
+# Check dimensions
+dim(crash_ts)
+
+# Check date range
+range(crash_ts$day)
+
+# Check for missing dates
+has_gaps(crash_ts)
+
+```
+
+
+
+This report presented the data preprocessing and exploratory data analysis of New York City motor vehicle collision records. The analysis examined daily and annual collision patterns, geographical differences across the five boroughs, reported contributing factors, and injuries among different road-user groups.
+
+The preprocessing procedures included data extraction, variable selection, missing-value assessment, date conversion, and aggregation of individual collision records into daily observations. These steps resulted in a structured daily time-series dataset suitable for further statistical analysis.
+
+The main outputs of this report include:
+
+A daily collision time series containing collision, injury, and fatality counts.
+An annual collision summary.
+A borough-level collision summary.
+A contributing-factor frequency and percentage summary.
+Visualizations illustrating daily collision trends, annual patterns, borough distributions, and injuries by road-user type.
+
+The exploratory analysis provides an initial understanding of collision patterns and highlights differences in collision frequency and injury outcomes. The daily collision time series will be particularly useful for investigating long-term trends, potential seasonal patterns, and autocorrelation.
+
+The processed datasets provide a foundation for the next stage of the project, which will focus on time-series analysis and forecasting. Statistical forecasting methods, including Exponential Smoothing (ETS) and Autoregressive Integrated Moving Average (ARIMA), will be considered to model historical collision patterns and evaluate their potential for predicting future collision activity in New York City.
+
 ---
 title: "01_preprocessing"
 output: html_document
