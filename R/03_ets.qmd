@@ -3,3 +3,24 @@ title: "ets"
 format: html
 ---
 
+```{r}
+library(fpp3)
+```
+
+```{r}
+crash_ts <- read.csv("../data/nyc_daily_crashes.csv") |>
+  mutate(day = as.Date(day)) |>       # text back to date
+  as_tsibble(index = day)             # back to a time series
+```
+
+## Train/Test Split
+
+```{r}
+# pre-2020 describes a different regime than post-2020
+train <-  crash_ts |> filter_index("2021-01-01" ~ "2024-12-31")
+test <- crash_ts |> filter_index("2025-01-01" ~ "2025-12-31")
+
+train |> 
+  gg_tsdisplay(crashes, plot_type = "partial", lag_max = 35)
+```
+

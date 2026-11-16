@@ -3,3 +3,240 @@ title: "03_arima"
 format: html
 ---
 
+```{r}
+library(fpp3)
+library(tidyverse)
+```
+
+
+```{r}
+crash_ts <- read.csv("../data/nyc_daily_crashes.csv") |>
+  mutate(day = as.Date(day)) |>       # text back to date
+  as_tsibble(index = day)             # back to a time series
+```
+
+
+```{r}
+crash_ts |> 
+autoplot(crash_ts)
+```
+
+```{r}
+# pre-2020 describes a different regime than post-2020
+train <-  crash_ts |> filter_index("2021-01-01" ~ "2024-12-31")
+test <- crash_ts |> filter_index("2025-01-01" ~ "2025-12-31")
+
+train |> 
+  gg_tsdisplay(crashes, plot_type = "partial", lag_max = 35)
+```
+```{r}
+train |>
+  autoplot(crashes) +
+  labs(title = "NYC Daily Crashes, Training Period (2021–2024)",
+       y = "Crashes per day", x = NULL)
+```
+
+
+```{r}
+# transformation check
+train |> features(crashes, features = guerrero)
+
+# how many seasonal (weekly) differences are needed?
+train |> features(crashes, unitroot_nsdiffs, .period = 7)
+
+# how many regular differences are needed?
+train |> features(crashes, unitroot_ndiffs)
+
+# alternative chec
+train |> features(crashes, unitroot_kpss)
+```
+
+```{r}
+train |>
+  gg_tsdisplay(difference(crashes), plot_type = "partial", lag_max = 35)
+```
+
+```{r}
+train |> 
+  gg_tsdisplay(difference(crashes, 7), plot_type = "partial", lag_max = 35)
+```
+
+```{r}
+train |> features(difference(crashes, 7), unitroot_kpss)
+train |> features(difference(crashes, 7), unitroot_ndiffs)
+```
+
+The raw training series failed the KPSS test (statistic 6.86, p < 0.01). After a weekly seasonal difference, the series passed (statistic 0.047, p > 0.10), so the manual model uses D = 1 and d = 0.
+
+
+```{r}
+# fit manual and auto-selected ARIMA on the training data
+fit <- train |>
+  model(
+    manual = ARIMA(crashes ~ pdq(1, 0, 0) + PDQ(0, 1, 1, period = 7)),
+    auto   = ARIMA(crashes)
+  )
+
+fit |> select(manual) |> report()
+fit |> select(auto) |> report()
+```
+
+```{r}
+# residual diagnostics for each model
+fit |> select(manual) |> gg_tsresiduals(lag_max = 35)
+fit |> select(auto)   |> gg_tsresiduals(lag_max = 35)
+
+# Ljung-Box test: lag = 2 x seasonal period (14); dof = number of estimated coefficients
+augment(fit) |> filter(.model == "manual") |> features(.innov, ljung_box, lag = 14, dof = 2)
+augment(fit) |> filter(.model == "auto")   |> features(.innov, ljung_box, lag = 14, dof = 4)
+```
+
+
+```{r}
+# forecast the 2025 test period
+fc <- fit |> forecast(new_data = test)
+
+# accuracy on the test set
+accuracy(fc, crash_ts)
+
+# forecast plots (Discussion 3 asks for both models)
+fc |>
+  filter(.model == "manual") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31")) +
+  labs(title = "Manual ARIMA(1,0,0)(0,1,1)[7]: 2025 forecast", y = "Crashes per day", x = NULL)
+
+fc |>
+  filter(.model == "auto") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31")) +
+  labs(title = "Auto ARIMA(0,1,2)(0,0,2)[7]: 2025 forecast", y = "Crashes per day", x = NULL)
+```
+
+```{r}
+fit |> select(manual) |> gg_tsresiduals(lag_max = 35)
+
+augment(fit) |> filter(.model == "manual") |>
+  features(.innov, ljung_box, lag = 14, dof = 2)
+```
+
+```{r}
+# compare nearby manual models (same differencing, so AICc is comparable)
+fit_try <- train |>
+  model(
+    m100 = ARIMA(crashes ~ pdq(1, 0, 0) + PDQ(0, 1, 1, period = 7)),
+    m101 = ARIMA(crashes ~ pdq(1, 0, 1) + PDQ(0, 1, 1, period = 7)),
+    m200 = ARIMA(crashes ~ pdq(2, 0, 0) + PDQ(0, 1, 1, period = 7)),
+    m201 = ARIMA(crashes ~ pdq(2, 0, 1) + PDQ(0, 1, 1, period = 7))
+  )
+
+glance(fit_try) |> arrange(AICc) |> select(.model, sigma2, AICc)
+```
+
+```{r}
+# does a third AR term help?
+fit_try3 <- train |>
+  model(m300 = ARIMA(crashes ~ pdq(3, 0, 0) + PDQ(0, 1, 1, period = 7)))
+glance(fit_try3) |> select(.model, sigma2, AICc)
+
+# residuals for m200
+fit_try |> select(m200) |> gg_tsresiduals(lag_max = 35)
+
+```
+```{r}
+# fit final manual model and auto model
+fit <- train |>
+  model(
+    manual = ARIMA(crashes ~ pdq(2, 0, 0) + PDQ(0, 1, 1, period = 7)),
+    auto   = ARIMA(crashes)
+  )
+
+# forecast the 2025 test period and score it
+fc <- fit |> forecast(new_data = test)
+accuracy(fc, crash_ts) |> select(.model, RMSE, MAE, MAPE, MASE)
+```
+
+```{r}
+fit <- train |>
+  model(
+    snaive = SNAIVE(crashes ~ lag("week")),
+    manual = ARIMA(crashes ~ pdq(2, 0, 0) + PDQ(0, 1, 1, period = 7)),
+    auto   = ARIMA(crashes)
+  )
+```
+
+```{r}
+# forecast the 2025 test period
+fc <- fit |> forecast(new_data = test)
+
+# accuracy on the test set
+accuracy(fc, crash_ts) |> select(.model, RMSE, MAE, MAPE, MASE)
+
+# manual model forecast plot
+fc |>
+  filter(.model == "manual") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31")) +
+  labs(title = "Manual ARIMA(2,0,0)(0,1,1)[7]: 2025 Forecast",
+       y = "Crashes per day", x = NULL)
+
+# auto model forecast plot
+fc |>
+  filter(.model == "auto") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31")) +
+  labs(title = "Auto ARIMA(0,1,2)(0,0,2)[7]: 2025 Forecast",
+       y = "Crashes per day", x = NULL)
+```
+
+```{r}
+# rolling-origin CV: start with 2 years of training, add 30 days each fold
+train_cv <- train |>
+  stretch_tsibble(.init = 730, .step = 30) |>
+  relocate(day, .id)
+
+# refit the manual model on every fold and forecast one week (one season) ahead
+fc_cv <- train_cv |>
+  model(manual = ARIMA(crashes ~ pdq(2, 0, 0) + PDQ(0, 1, 1, period = 7))) |>
+  forecast(h = 7) |>
+  group_by(.id) |>
+  mutate(h = row_number()) |>
+  ungroup() |>
+  as_fable(response = "crashes", distribution = crashes)
+
+# overall CV accuracy
+fc_cv |> accuracy(crash_ts) |> select(.model, RMSE, MAE, MAPE)
+
+# accuracy by forecast horizon (1 to 7 days ahead)
+fc_cv |>
+  accuracy(crash_ts, by = c("h", ".model")) |>
+  ggplot(aes(x = h, y = MAE)) +
+  geom_point() + geom_line() +
+  labs(title = "Cross-validated MAE by forecast horizon",
+       x = "Days ahead", y = "MAE (crashes per day)")
+
+# accuracy by fold: how the model holds up across time periods
+fc_cv |>
+  accuracy(crash_ts, by = c(".id", ".model")) |>
+  ggplot(aes(x = .id, y = MAE)) +
+  geom_point() + geom_line() +
+  labs(title = "Cross-validated MAE across rolling folds",
+       x = "Fold (each adds 30 days of training data)", y = "MAE (crashes per day)")
+```
+
+
+```{r}
+train |>
+  autoplot(crashes) +
+  labs(title = "NYC Daily Crashes, Training Period (2021–2024)",
+       y = "Crashes per day", x = NULL)
+```
+
+```{r}
+fit |> select(manual) |> gg_tsresiduals(lag_max = 35)
+```
+
+
+```{r}
+train |>
+  stretch_tsibble(.init = 730, .step = 30) |>
+  model(ARIMA(crashes ~ pdq(2, 0, 0) + PDQ(0, 1, 1, period = 7))) |>
+  forecast(h = 7)
+```
+

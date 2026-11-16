@@ -4,8 +4,62 @@ output: html_document
 ---
 
 ```{r}
+library(fpp3)
+library(tidyverse)
+```
+
+
+```{r}
 crash_ts <- read.csv("../data/nyc_daily_crashes.csv") |>
   mutate(day = as.Date(day)) |>       # text back to date
   as_tsibble(index = day)             # back to a time series
+```
+
+## Daily Crashes
+
+```{r}
+crash_ts |> 
+  autoplot(crashes) +
+  labs(title = "NYC Daily Mot Vehicle Collisions", y="Crashes per Day", x=NULL)
+```
+
+## Weekly Seasonality
+```{r}
+crash_ts |>
+  filter_index("2023-01-01" ~ "2024-12-31") |>
+  gg_season(crashes, period = "week") +
+  labs(title = "Weekly pattern in daily crashes (2023–2024)", y = "Crashes per day", x = NULL)
+```
+
+## Annual Seasonality
+```{r}
+crash_ts |>
+  gg_season(crashes, period = "year") +
+  labs(title = "Annual pattern in daily crashes by year", y = "Crashes per day", x = NULL)
+```
+
+## Severity: injuries and deaths
+```{r}
+crash_ts |>
+  index_by(week = yearweek(day)) |>
+  summarise(injured = sum(injured), killed = sum(killed)) |>
+  pivot_longer(c(injured, killed), names_to = "severity", values_to = "people") |>
+  autoplot(people) +
+  facet_grid(severity ~ ., scales = "free_y") +
+  labs(title = "Weekly people injured and killed", y = "People", x = NULL)
+```
+
+## Road user: who gets injured
+
+```{r}
+crash_ts |>
+  index_by(week = yearweek(day)) |>
+  summarise(Pedestrians = sum(ped_injured),
+            Cyclists    = sum(cyc_injured),
+            Motorists   = sum(mot_injured)) |>
+  pivot_longer(-week, names_to = "road_user", values_to = "injured") |>
+  autoplot(injured) +
+  facet_grid(road_user ~ ., scales = "free_y") +
+  labs(title = "Weekly injuries by road user", y = "People injured", x = NULL)
 ```
 
