@@ -1,3 +1,349 @@
+
+---
+title: 'Time Series Linear Model (TSLM): NYC Motor Vehicle Collisions'
+output: html_document
+date: "2026-11-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+#1. Introduction
+
+This report develops a Time Series Linear Model (TSLM) to analyze and forecast daily motor vehicle collisions in New York City.
+
+The analysis builds upon the data preprocessing and exploratory data analysis conducted in the previous stage of the project. The EDA identified several important characteristics of the collision dataset, including a substantial decline in collision frequency around 2020, continued decreases in subsequent years, and recurring weekly variations in collision activity.
+
+The primary objective of this analysis is to develop statistical models that capture the underlying trend and seasonal patterns in daily motor vehicle collisions.
+
+The analysis will:
+
+Examine historical trends and seasonal characteristics.
+Develop TSLM models incorporating trend and seasonal components.
+Evaluate model assumptions using residual diagnostics.
+Generate forecasts for the 2025 testing period.
+Assess forecasting performance using appropriate accuracy measures.
+
+```{r setup, message=FALSE, warning=FALSE}
+library(fpp3)
+library(data.table)
+library(tidyverse)
+library(lubridate)
+
+raw <- data.table::fread(
+  "C:/Motor_Vehicle_Collisions_-_Crashes_20261114.csv"
+)
+
+
+#3. Data Preparation
+```{r}
+crash_ts <- raw |>
+  mutate(
+    day = as.Date(`CRASH DATE`, format = "%m/%d/%Y")
+  ) |>
+  filter(!is.na(day)) |>
+  group_by(day) |>
+  summarise(
+    crashes = n(),
+    .groups = "drop"
+  ) |>
+  as_tsibble(index = day)
+
+```
+
+
+#4. Exploratory Time Series Plot
+```{r}
+crash_ts |>
+  autoplot(crashes) +
+  labs(
+    title = "NYC Daily Motor Vehicle Collisions",
+    subtitle = "July 2012 – November 2026",
+    x = "Date",
+    y = "Daily Collisions"
+  ) 
+```
+
+#5. Training and Testing Data
+
+The training dataset covers January 2021 through December 2024. The testing dataset covers January 2025 through December 2025.
+
+```{r}
+train <- crash_ts |>
+  filter_index("2021-01-01" ~ "2024-12-31")
+
+test <- crash_ts |>
+  filter_index("2025-01-01" ~ "2025-12-31")
+```
+
+
+#Create a sequential trend variable and weekday variable.
+
+```{r}
+train <- train |>
+  mutate(
+    trend = row_number(),
+    weekday = factor(
+      lubridate::wday(day),
+      levels = 1:7,
+      labels = c(
+        "Sunday", "Monday", "Tuesday",
+        "Wednesday", "Thursday", "Friday", "Saturday"
+      )
+    )
+  )
+
+test <- test |>
+  mutate(
+    trend = row_number() + nrow(train),
+    weekday = factor(
+      lubridate::wday(day),
+      levels = 1:7,
+      labels = c(
+        "Sunday", "Monday", "Tuesday",
+        "Wednesday", "Thursday", "Friday", "Saturday"
+      )
+    )
+  )
+
+```
+
+
+#6. Trend-Only TSLM Model
+
+The first model incorporates a linear time trend to examine the overall direction of daily motor vehicle collisions.
+```{r}
+fit_trend <- train |>
+  model(
+    trend = TSLM(crashes ~ trend)
+  )
+
+report(fit_trend)
+```
+
+
+#6.1 Trend Model Residual Diagnostics
+```{r}
+fit_trend |>
+  gg_tsresiduals()
+
+```
+
+
+#7. Trend Model Forecasting
+
+Generate forecasts for the 2025 testing period.
+```{r}
+forecast_trend <- fit_trend |>
+  forecast(new_data = test)
+
+forecast_trend
+```
+
+
+
+
+#7.1 Trend Model Forecast Plot
+```{r}
+autoplot(forecast_trend, crash_ts) +
+  labs(
+    title = "NYC Daily Motor Vehicle Collision Forecast",
+    subtitle = "Trend-Only TSLM Model: 2025",
+    x = "Date",
+    y = "Daily Collisions"
+  )
+```
+```{r}
+plot_trend <- autoplot(forecast_trend, crash_ts) +
+  labs(
+    title = "NYC Daily Motor Vehicle Collision Forecast",
+    subtitle = "Trend-Only TSLM Model: 2025",
+    x = "Date",
+    y = "Daily Collisions"
+  )
+
+ggsave(
+  "C:/Users/newer/Desktop/Trend_Forecast.png",
+  plot = plot_trend,
+  width = 10,
+  height = 6,
+  dpi = 300
+)
+```
+
+
+
+#7.2 Trend Model Accuracy
+```{r}
+accuracy_trend <- accuracy(forecast_trend, test)
+
+accuracy_trend
+
+```
+
+
+#8. Trend and Weekly Seasonality Model
+
+The second model incorporates both a linear trend and weekday effects. This allows the model to capture differences in collision frequency across the seven days of the week.
+```{r}
+fit_trend_seasonal <- train |>
+  model(
+    trend_seasonal = TSLM(
+      crashes ~ trend + weekday
+    )
+  )
+
+report(fit_trend_seasonal)
+
+```
+
+
+
+#8.1 Seasonal Model Residual Diagnostics
+```{r}
+fit_trend_seasonal |>
+  gg_tsresiduals()
+```
+
+
+
+#9. Seasonal Model Forecasting
+```{r}
+forecast_seasonal <- fit_trend_seasonal |>
+  forecast(new_data = test)
+
+forecast_seasonal
+```
+
+
+
+#9.1 Seasonal Forecast Plot
+```{r}
+autoplot(forecast_seasonal, crash_ts) +
+  labs(
+    title = "NYC Daily Motor Vehicle Collision Forecast",
+    x = "Date",
+    y = "Daily Collisions"
+  ) 
+```
+
+ 
+#10. Seasonal Model Accuracy
+```{r}
+accuracy_seasonal <- accuracy(forecast_seasonal, test)
+
+accuracy_seasonal
+```
+
+
+
+#11. Model Comparison
+
+Compare both models using RMSE, MAE, MAPE, and ACF1.
+```{r}
+model_comparison <- bind_rows(
+  accuracy_trend |>
+    mutate(Model = "Trend Only"),
+
+  accuracy_seasonal |>
+    mutate(Model = "Trend + Weekly Seasonality")
+) |>
+  select(
+    Model,
+    RMSE,
+    MAE,
+    MAPE,
+    ACF1
+  )
+
+model_comparison
+```
+
+```{r}
+fit_trend_seasonal |>
+  gg_tsresiduals()
+```
+
+```{r}
+fit_tslm_full <- train |>
+  model(
+    TSLM_Full = TSLM(
+      crashes ~ trend +
+        weekday +
+        fourier(K = 5, period = 365.25)
+    )
+  )
+
+report(fit_tslm_full)
+```
+
+```{r}
+forecast_tslm_full <- fit_tslm_full |>
+  forecast(new_data = test)
+
+accuracy_tslm_full <- accuracy(
+  forecast_tslm_full,
+  test
+)
+
+accuracy_tslm_full
+```
+
+```{r}
+fit_tslm_full |>
+  gg_tsresiduals()
+```
+
+
+
+#Important findings
+The trend coefficient remains negative and statistically significant.
+
+Friday has the largest positive weekday effect, approximately 45.92 additional collisions compared with Sunday, holding the trend constant.
+
+Thursday has approximately 25.96 additional collisions compared with Sunday.
+
+All six weekday coefficients are statistically significant.
+
+R-squared increased from 18.56% to 27.76%.
+
+The two TSLM models are evaluated to determine whether incorporating weekly seasonality improves forecasting accuracy compared with a trend-only specification.
+
+The final model selection will consider forecast accuracy measures, including RMSE, MAE, and MAPE, as well as residual diagnostics. The selected model should provide a reasonable balance between forecasting accuracy and the ability to capture the temporal patterns present in daily motor vehicle collisions.
+
+
+#12. Conclusion
+
+This analysis developed and evaluated three Time Series Linear Models (TSLM) to analyze and forecast daily motor vehicle collisions in New York City. The models incorporated progressively more complex temporal components, beginning with a linear trend, followed by weekly seasonal effects, and finally a combination of weekly and annual seasonal components.
+
+The first model incorporated a linear trend and produced an R-squared value of 0.1856, indicating that approximately 18.56% of the variation in daily collision counts was explained by the model. The estimated trend coefficient was -0.042415 and statistically significant (p < 0.001), indicating a significant downward trend in daily collision frequency during the training period.
+
+The second model incorporated both a linear trend and weekday seasonal effects. Its R-squared value increased to 0.2776, explaining approximately 27.76% of the variation in daily collision counts. The weekday coefficients demonstrated meaningful differences in collision frequency across the week. Friday had the largest positive effect, with approximately 45.92 additional collisions compared with Sunday, holding the trend constant. Thursday also showed a relatively large positive effect of approximately 25.96 additional collisions. All six weekday coefficients were statistically significant.
+
+The third model extended the analysis by incorporating annual seasonality through Fourier terms. This model achieved an R-squared value of 0.4886 and an adjusted R-squared of 0.4826, indicating that approximately 48.86% of the variation in daily collision counts was explained. The estimated trend coefficient remained negative and statistically significant at -0.049083. The weekday effects also remained statistically significant, with Friday continuing to exhibit the largest positive effect, at approximately 45.90 additional collisions compared with Sunday.
+
+Forecast accuracy was evaluated using the 2025 testing dataset. The trend-only model produced an RMSE of 31.35, MAE of 24.96, and MAPE of 11.21%. The trend and weekly seasonality model improved these results, achieving an RMSE of 29.38, MAE of 23.00, and MAPE of 10.35%. The full TSLM model achieved the best forecasting performance, with an RMSE of 25.99, MAE of 20.25, and MAPE of 8.74%.
+
+Compared with the trend-only model, the full TSLM reduced RMSE by approximately 17.1%, MAE by 18.9%, and MAPE by 22.0%. These improvements suggest that incorporating annual seasonal components provides additional predictive information beyond the linear trend and weekly seasonal effects.
+
+Residual diagnostics also showed improvement in the full model. Its first-order autocorrelation decreased to 0.294, compared with 0.42 for the trend-only model and 0.45 for the trend and weekly seasonality model. Although this indicates reduced residual autocorrelation, some temporal dependence remains unexplained.
+
+Overall, the full TSLM model provided the strongest results among the three regression specifications, demonstrating that daily motor vehicle collision frequency is influenced by a combination of long-term trends, weekly variations, and annual seasonal patterns. The findings highlight the importance of incorporating multiple seasonal components when forecasting daily collision activity.
+
+However, the full model should not yet be considered the definitive best forecasting approach until its performance is compared against a seasonal naïve benchmark and the other forecasting methods developed by the project team, including ARIMA and ETS. This final comparison will help determine whether the additional model complexity translates into meaningful forecasting improvements.
+
+The analysis demonstrates that TSLM provides a useful and interpretable framework for understanding and forecasting daily motor vehicle collisions in New York City, while also highlighting the importance of residual diagnostics and out-of-sample evaluation when selecting forecasting models.
+
+
+
+
+
+
+
 ---
 title: "03_tslm"
 format: html
