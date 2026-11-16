@@ -56,11 +56,11 @@ All modeling follows *Forecasting: Principles and Practice* (3rd ed.) using the 
 
 - **Benchmark:** Seasonal naive (weekly period)
 - **Time series regression (TSLM):** trend, seasonal dummies, and Fourier terms
-- **ARIMA / dynamic regression:** Fourier terms for annual seasonality, with weather, holiday, and daylight saving time regressors
+- **ARIMA / dynamic regression:** seasonal ARIMA with a weekly (period 7) seasonal component; manual and auto-selected models compared. Dynamic regression with Fourier terms and holiday/weather regressors is a planned extension.
 - **ETS:** applied to aggregated weekly series as an additional comparison
-- **Structural break:** the post-2020 level shift is handled with an indicator variable and/or a post-break training window
+- **Structural break:** crashes dropped by about half in 2020 and did not recover, so models are trained on post-2020 data only.
 
-Models are trained on earlier years and evaluated on a held-out test period at the end of the series.
+**Train/test split (all models):** train on 2021–2024, test on 2025.
 
 ---
 
@@ -68,15 +68,18 @@ Models are trained on earlier years and evaluated on a held-out test period at t
 
 ```
 R/
-  00_download_raw.R       Downloads the raw crash file (run once)
-  01_preprocessing.Rmd    Cleans raw data and builds the daily series
-  02_eda.Rmd              Exploratory data analysis
-  03_arima.qmd            ARIMA / dynamic regression model
-  03_ets.qmd              ETS model
-  03_tslm.qmd             Time series regression model
+  00_download_raw.R         Downloads the raw crash file (run once)
+  01_preprocessing.Rmd      Cleans raw data and builds the daily series
+  02_eda.Rmd                Exploratory data analysis
+  03_arima.qmd              ARIMA model
+  03_ets.qmd                ETS model
+  03_tslm.qmd               Time series regression model
+  04_model_comparison.qmd   All models scored on the test set (planned)
+  05_final_forecast.qmd     Final forecast and interpretation (planned)
 data/
-  nyc_daily_crashes.csv   Daily crash series (output of 01_preprocessing)
-  raw/                    Raw download (not tracked by Git)
+  nyc_daily_crashes.csv     Daily crash series (output of 01_preprocessing)
+  raw/                      Raw download (not tracked by Git)
+figures/                    Final figures for the report and presentation
 README.md
 ```
 
@@ -107,4 +110,6 @@ Hyndman, R. J., & Athanasopoulos, G. (2021). Forecasting: Principles and Practic
 
 https://otexts.com/fpp3/
 
+## AI Use Disclosure
 
+Claude (Anthropic) was used to help structure the repository, draft data processing code, and work through modeling steps. All code and results were reviewed and modified by the team.
