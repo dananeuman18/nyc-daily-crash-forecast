@@ -1,9 +1,11 @@
 ---
 title: "ets"
-format: html
+author: "Samuel Scott"
+format: pdf
 ---
 
 ```{r}
+library(tidyverse)
 library(fpp3)
 ```
 
@@ -13,7 +15,7 @@ crash_ts <- read.csv("../data/nyc_daily_crashes.csv") |>
   as_tsibble(index = day)             # back to a time series
 ```
 
-## Train/Test Split
+## 1.Train/Test Split
 
 ```{r}
 # pre-2020 describes a different regime than post-2020
@@ -23,4 +25,201 @@ test <- crash_ts |> filter_index("2025-01-01" ~ "2025-12-31")
 train |> 
   gg_tsdisplay(crashes, plot_type = "partial", lag_max = 35)
 ```
+  The crashes time plot shows that crashes remain between 50-100. There are a few outliers of crashes that appears to be in the middle of 2022 to 2023, nearing to 150 crashes during those days which could be due to the amount of visitors touring New York City. The crash total appears to quell in the last 3 years, as most of the crash day total are under 100 with a few exceptions, with one of those being a day near the end of 2023 reaching over 120 crashes. 
+  The ACF plot shows all 35 lags are significant with decay as the lag number increases. The small rises every 7th lag indicates strong weekly seasonality.
+  The PACF plot has one big spike at lag 1 showing that there is strong
+correlation between crashes number total being affected strongly by what occurred yesterday. There are also smaller spikes at lags 2,3,6,7, and 14,
+so a day’s count is informative about the next day’s even after accounting for shorter lags, and the weekly pattern shows up as well.
 
+## 2.Which seasonality does ETS need to handle?
+
+```{r}
+train |>
+  autoplot(crashes) +
+  labs(title = "NYC Daily Crashes, Training Period (2021-2024)",
+       y = "Crashes per day")
+```
+
+##3. Should the data need transformation?
+
+```{r}
+lambda <- train |>
+  features(crashes, features = guerrero) |>
+  pull(lambda_guerrero)
+print(lambda)
+```
+A low value for guerrero generally means there is an argument for a no data transformation. 
+
+##4. Fitting Models
+
+```{r}
+fit <- train |>
+  model(
+  baseline = SNAIVE(crashes ~ lag("week")),
+  add_hw = ETS(crashes ~ error("A") + trend("A") + season("A", period = 7)), #sets period to 7 for weekly period
+  mult_hw = ETS(crashes ~ error("M") + trend("A") + season("M", period = 7)),
+  add_hw_bc = ETS(box_cox(crashes, lambda) ~ error("A") + trend("A") + season("A", period = 7)),
+  auto_ets = ETS(crashes)
+  )
+```
+
+###4a. What did auto ETS report?
+
+```{r}
+fit |> 
+  select(auto_ets) |>
+  report()
+```
+```{r}
+fit |>
+  select(add_hw) |>
+  report()
+```
+```{r}
+fit |>
+  select(mult_hw) |>
+  report()
+```
+```{r}
+fit |>
+  select(add_hw_bc) |>
+  report()
+```
+
+```{r}
+#nto including ets box cox since transformed models are not comparable to 
+ets_fit <- fit |>
+  select(add_hw, mult_hw, auto_ets)
+
+glance(ets_fit) |>
+  arrange(AICc) |>
+  select(.model, AIC, AICc, BIC, sigma2)
+```
+
+```{r}
+train_acc <- accuracy(fit) |>
+  arrange(RMSE) |>
+  select(.model, ME, RMSE, MAE, MAPE)
+
+knitr::kable(train_acc, digits=2,  col.names = 
+             c("Model", "ME", "RMSE", "MAE", "MAPE"),
+             caption = "Training accuracy on all models",
+             align = "c")
+```
+
+
+##5. Residual evaluation
+
+
+```{r}
+#| warning: false
+fit |> select(add_hw) |>
+  gg_tsresiduals() +
+  labs(title = "Additive Holt Residuals")
+
+fit |> select(mult_hw) |>
+  gg_tsresiduals() +
+  labs(title = "Multiplicative Holt Residuals")
+
+fit |> select(add_hw_bc) |>
+  gg_tsresiduals() +
+  labs(title = "Additive Box Cox Residuals")
+
+fit |> select(auto_ets) |>
+  gg_tsresiduals() +
+  labs(title = "Auto ETS Residuals")
+
+augment(fit) |>
+  features(.innov, ljung_box, lag = 35)
+```
+
+Ljung-Box tests rejected white noise for all models (p < 0.05). The multiplicative Holt model had the smallest statistic (61.6) and the baseline the largest (530.3), so no model fully captures the autocorrelation structure, though ETS models substantially reduce it relative to the baseline. This is consistent with influences ETS cannot represent, such as holidays, weather, and the shift in level after 2022, which motivates the regression-based models.
+
+
+##6. Forecast 2025 test period
+
+```{r}
+fc <- fit |> forecast(new_data = test)
+
+fc |>
+  filter(.model == "baseline") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31"), level = NULL) +
+  labs(title = "Baseline 2025 forecast", y = "Crashes per day")
+```
+
+```{r}
+fc |>
+  filter(.model == "add_hw") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31"), level = NULL) +
+  labs(title = "Additive Holts Winter 2025 forecast", y = "Crashes per day")
+```
+
+```{r}
+fc |>
+  filter(.model == "mult_hw") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31"), level = NULL) +
+  labs(title = "Multiplicative Holts Winter 2025 forecast", y = "Crashes per day")
+```
+```{r}
+fc |>
+  filter(.model == "add_hw_bc") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31"), level = NULL) +
+  labs(title = "Additive Box Cox 2025 forecast", y = "Crashes per day")
+```
+
+
+
+
+```{r}
+fc |>
+  filter(.model == "auto_ets") |>
+  autoplot(crash_ts |> filter_index("2024-07-01" ~ "2025-12-31"), level = NULL) +
+  labs(title = "Auto ETS 2025 forecast", y = "Crashes per day")
+```
+```{r}
+acc <- accuracy(fc, crash_ts) |>
+  select(.model, RMSE, MAE, MAPE, MASE) |>
+  arrange(MAE)
+knitr::kable(acc, digits=2,  col.names = 
+             c("Model", "ME", "RMSE", "MAE", "MAPE"),
+             caption = "Forecast accuracy on all models",
+             align = "c")
+```
+## 7. Cross Validation
+
+
+```{r}
+#| warning: false
+crashes_stretch <- train |>
+  stretch_tsibble(.init = 730, .step = 30)
+
+fc_cv <- crashes_stretch |>
+  model(
+    baseline = SNAIVE(crashes ~ lag("week")),
+  add_hw = ETS(crashes ~ error("A") + trend("A") + season("A", period = 7)), #sets period to 7 for weekly period
+  mult_hw = ETS(crashes ~ error("M") + trend("A") + season("M", period = 7)),
+  add_hw_bc = ETS(box_cox(crashes, lambda) ~ error("A") + trend("A") + season("A", period = 7)),
+  auto_ets = ETS(crashes)
+  ) |>
+  forecast(h = 7) |>
+  group_by(.id, .model) |>
+  mutate(h = row_number()) |>
+  ungroup() |>
+  as_fable(response = "crashes", distribution = crashes)
+
+cv_acc <- accuracy(fc_cv, train) |>
+  arrange(RMSE) |>
+  select(.model, RMSE, MAE, MAPE, MASE)
+knitr::kable(cv_acc, digits = 2, col.names = c("Model", "RMSE",
+              "MAE", "MAPE", "MASE"), align='c')
+
+cv_fold <- accuracy(fc_cv, crash_ts, by = c(".id", ".model"))
+
+ggplot(cv_fold, aes(.id, MAE, colour = .model)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  labs(title = "Cross-validated MAE across rolling folds",
+       x = "Fold (each adds 30 days of training data)",
+       y = "MAE (crashes per day)", colour = "Model")
+```
+Cross Validation with initial window of 730 days with 30 day stepping showed that all the ETS models outperformed the seasonal naive baseline model, reducing MAE from 10.43 crashes to between 7.72 and 7.84 crashes per day, a 25% reduction and RMSE from 13.52 to around 10 crashes. The cross-validation differences between the ETS metrics were small, so cross validation does not improve performace of models if models compared are all ETS models. The Box-Cox transformation on Additive Holt Winters proved to offer no improvement, which is consistent with the decision to not transform. There are some errors that the models accounted for, which may correspond to holiday weeks, a variation occurrence that ETS cannot capture. 
