@@ -32,7 +32,7 @@ library(janitor)
 library(janitor)
 
 crashes <- readr::read_csv(
-  "C:/Users/newer/OneDrive/Desktop/ADS 506/Final Assignment/data/Motor_Vehicle_Collisions_-_Crashes_20261114.csv",
+  "
   show_col_types = FALSE
 ) |>
   clean_names()
