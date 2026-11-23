@@ -24,6 +24,7 @@ library(fpp3)
 library(lubridate)
 library(scales)
 library(patchwork)
+library(janitor)
 ```
 #2.2 Import the Dataset
 
@@ -31,7 +32,7 @@ library(patchwork)
 library(janitor)
 
 crashes <- readr::read_csv(
-  
+  "C:/Users/newer/OneDrive/Desktop/ADS 506/Final Assignment/data/Motor_Vehicle_Collisions_-_Crashes_20261114.csv",
   show_col_types = FALSE
 ) |>
   clean_names()
@@ -39,6 +40,53 @@ crashes <- readr::read_csv(
 glimpse(crashes)
 names(crashes)
 ```
+
+```{r}
+# Convert crash dates
+crashes <- crashes |>
+  mutate(
+    day = lubridate::mdy(crash_date)
+  ) |>
+  filter(!is.na(day))
+
+# Create daily collision time series
+crash_ts <- crashes |>
+  count(day, name = "crashes") |>
+  as_tsibble(index = day) |>
+  fill_gaps(.full = TRUE) |>
+  mutate(
+    crashes = replace_na(crashes, 0)
+  )
+
+# Verify that crash_ts was created
+glimpse(crash_ts)
+
+# Check date range
+range(crash_ts$day)
+
+# Count observations
+nrow(crash_ts)
+```
+```{r}
+# Restrict dataset to the project period
+crash_ts <- crash_ts |>
+  filter_index("2012-07-01" ~ "2025-12-31")
+
+# Verify date range
+range(crash_ts$day)
+
+# Verify observations
+nrow(crash_ts)
+```
+
+#Data Quality Assessment
+
+The prepared daily collision dataset contains 4,932 observations covering July 1, 2012, through December 31, 2025. Data quality checks identified no missing collision counts and no duplicate dates after daily aggregation and completion of the calendar time index.
+
+The training dataset contains 4,567 daily observations covering July 2012 through December 2024, while the testing dataset contains 365 observations covering the full 2025 calendar year.
+
+The weekday distribution is relatively balanced, with 652 or 653 observations for each day of the week. This provides sufficient historical coverage to investigate recurring weekly patterns and develop forecasting models.
+
 #2.3 Convert Dates and Prepare Daily Observations
 
 Each row represents an individual collision. The records are aggregated into daily collision counts.
@@ -105,18 +153,21 @@ crash_ts |>
   )
 ```
 
-#3. Training and Testing Data
-The training dataset covers January 2012 through December 2024. The testing dataset covers January through December 2025.
-
-The chronological split prevents future observations from being used during model estimation.
-
 ```{r}
+# =====================================
+# SECTION 3: TRAINING AND TESTING DATA
+# =====================================
+
+# Create training dataset
 train <- crash_ts |>
-  filter_index("2012-01-01" ~ "2024-12-31") |>
-  mutate(
-    trend = row_number(),
+  dplyr::filter(
+    day >= as.Date("2012-07-01"),
+    day <= as.Date("2024-12-31")
+  ) |>
+  dplyr::mutate(
+    trend = dplyr::row_number(),
     weekday = factor(
-      wday(day),
+      lubridate::wday(day),
       levels = 1:7,
       labels = c(
         "Sunday", "Monday", "Tuesday",
@@ -126,12 +177,16 @@ train <- crash_ts |>
     )
   )
 
+# Create testing dataset
 test <- crash_ts |>
-  filter_index("2025-01-01" ~ "2025-12-31") |>
-  mutate(
-    trend = row_number() + nrow(train),
+  dplyr::filter(
+    day >= as.Date("2025-01-01"),
+    day <= as.Date("2025-12-31")
+  ) |>
+  dplyr::mutate(
+    trend = dplyr::row_number() + nrow(train),
     weekday = factor(
-      wday(day),
+      lubridate::wday(day),
       levels = 1:7,
       labels = c(
         "Sunday", "Monday", "Tuesday",
@@ -141,19 +196,15 @@ test <- crash_ts |>
     )
   )
 
-# Verify observations
-nrow(train)
-nrow(test)
+# Verify datasets
+cat("Training observations:", nrow(train), "\n")
+cat("Testing observations:", nrow(test), "\n")
 
-range(train$day)
-range(test$day)
+cat("Training dates:\n")
+print(range(train$day))
 
-# Check weekday distribution
-table(train$weekday)
-table(test$weekday)
-
-# Confirm complete testing period
-stopifnot(nrow(test) == 365)
+cat("Testing dates:\n")
+print(range(test$day))
 ```
 
 The trend variable provides a continuous sequential index across the training and testing periods. The weekday variable identifies recurring weekly patterns.
@@ -186,7 +237,7 @@ anyDuplicated(crash_ts$day)
 ```
 
 #4. Exploratory Analysis of Weekly Patterns
-#4.1 Average Collisions by Weekday
+
 ```{r}
 weekday_avg <- train |>
   as_tibble() |>
@@ -207,14 +258,26 @@ weekday_chart <- ggplot(
   ) +
   labs(
     title = "Average NYC Daily Collisions by Weekday",
-    subtitle = "Training period: 2012–2024",
+    subtitle = "Training period: July 2012–December 2024",
     x = "Day of the Week",
     y = "Average Daily Collisions"
-  ) +
-  theme_minimal()
+  ) 
 
 weekday_chart
 ```
+#Interpretation: Average Collisions by Weekday
+
+The weekday analysis reveals noticeable differences in daily motor vehicle collision frequency across the seven days of the week in New York City during the training period (July 2012–December 2024).
+
+Friday recorded the highest average number of daily collisions, at approximately 524.2, followed by Thursday at 491.7 and Tuesday at 483.9. Wednesday and Monday recorded averages of 480.9 and 469.8, respectively.
+
+Weekend collision averages were comparatively lower. Saturday recorded approximately 444.4 daily collisions, while Sunday had the lowest average, at 393.4.
+
+These findings suggest that collision frequency varies systematically throughout the week. Higher average collision counts toward the end of the workweek may be associated with commuting activity, traffic exposure, and changes in travel behavior. Lower Sunday averages may reflect differences in overall traffic volume and travel patterns.
+
+The observed weekly variation supports incorporating weekday indicators into the ARIMAX and TSLM forecasting models. These explanatory variables allow the models to account for recurring differences in collision frequency across the seven days of the week.
+
+However, these descriptive results identify associations rather than establish the causes of collision frequency differences.
 
 #4.2 Weekdays Versus Weekends
 ```{r}
@@ -272,6 +335,19 @@ weekday_weekend_chart <- ggplot(
 
 weekday_weekend_chart
 ```
+
+#Interpretation: Weekdays Versus Weekends
+
+The weekday-versus-weekend analysis identifies differences in average daily motor vehicle collision frequency in New York City during the training period (July 2012–December 2024).
+
+The results indicate that weekdays recorded an average of approximately 490.09 collisions per day, compared with 420.34 collisions per day on weekends. This represents a difference of approximately 69.75 collisions per day, or 16.6% higher collision frequency on weekdays relative to weekends.
+
+The higher weekday average may be associated with increased commuting activity, business-related transportation, and greater traffic exposure during the working week. Conversely, lower weekend collision averages may reflect differences in commuting patterns and overall travel activity.
+
+These findings demonstrate that collision frequency varies across the weekly cycle. Consequently, incorporating weekday indicators into the ARIMAX and TSLM forecasting models is appropriate because these variables help account for recurring weekly differences in collision frequency.
+
+However, the descriptive comparison does not establish that commuting activity causes the observed differences. Additional traffic-volume and exposure data would be necessary to investigate these relationships.
+
 ```{r}
 ggsave(
   "weekday_weekend_comparison.png",
@@ -282,14 +358,7 @@ ggsave(
 )
 ```
 
-#interpretation
-Weekdays Versus Weekends
 
-The weekday-versus-weekend analysis examines differences in average daily motor vehicle collisions in New York City. Daily collision counts were grouped into weekdays (Monday through Friday) and weekends (Saturday and Sunday), and the average number of collisions was calculated for each group.
-
-The comparison provides insight into how traffic activity and collision frequency vary across the weekly cycle. Differences between the two groups may reflect variations in commuting patterns, travel behavior, and recreational activity.
-
-These findings support the inclusion of weekday effects in the time-series forecasting models, allowing the analysis to account for systematic differences in collision frequency across the days of the week.
 
 #5. Stationarity and Time-Series Diagnostics
 Stationarity is important when developing ARIMA forecasting models. The analysis uses visual inspection, autocorrelation plots, and formal stationarity tests to investigate the characteristics of daily collision counts.
@@ -331,7 +400,17 @@ train |>
     unitroot_nsdiffs
   )
 ```
-The differencing recommendations help identify whether regular or seasonal differencing may be appropriate for ARIMA modeling.
+#Interpretation: Stationarity and Differencing Tests
+
+The KPSS stationarity test was conducted to evaluate whether the daily motor vehicle collision time series exhibited stationary behavior during the training period (July 2012–December 2024).
+
+The test produced a KPSS statistic of 28.927 and a p-value of 0.01. Since the p-value is below the 0.05 significance level, the null hypothesis of stationarity is rejected. This indicates that the collision time series exhibits non-stationary characteristics.
+
+Additional differencing tests were conducted to determine the appropriate transformation for ARIMA modeling. The regular differencing test recommended one difference (ndiffs = 1), while the seasonal differencing test recommended zero seasonal differences (nsdiffs = 0).
+
+These results suggest that regular differencing may be necessary to address the non-stationary behavior of the series. However, the absence of a recommended seasonal difference does not imply that seasonal patterns are absent. The exploratory analysis identified clear weekly variations in collision frequency, which can be represented through seasonal modeling components and weekday explanatory variables.
+
+The stationarity results provide useful guidance for the subsequent ARIMA and ARIMAX modeling stages.
 
 #6. ETS Forecasting Models
 Exponential Smoothing models estimate the level, trend, and seasonal components of a time series.
@@ -339,7 +418,7 @@ Exponential Smoothing models estimate the level, trend, and seasonal components 
 This analysis evaluates an additive ETS specification and an automatically selected ETS model.
 
 ```{r}
-  ets_models <- train |>
+ ets_models <- train |>
   model(
     ETS_Additive = ETS(
       crashes ~ error("A") +
@@ -350,7 +429,6 @@ This analysis evaluates an additive ETS specification and an automatically selec
     ETS_Automatic = ETS(crashes)
   )
 
-# Model summaries
 report(ets_models)
 ```
 An additive ETS specification is used as a benchmark. The automatic ETS model selects an appropriate exponential smoothing structure based on the training data.
@@ -362,22 +440,6 @@ A multiplicative seasonal model can also be considered if the observations are s
 ets_fc <- ets_models |>
   forecast(new_data = test)
 
-autoplot(
-  ets_fc,
-  crash_ts |> filter_index("2025")
-) +
-  labs(
-    title = "ETS Model Forecast Comparison",
-    subtitle = "NYC Daily Motor Vehicle Collisions: 2025",
-    x = "Date",
-    y = "Daily Collisions",
-    color = "ETS Model"
-  ) +
-  theme_minimal()
-```
-
-#6.2 ETS Accuracy
-```{r}
 ets_accuracy <- accuracy(
   ets_fc,
   test
@@ -394,6 +456,92 @@ ets_accuracy <- accuracy(
 ets_accuracy
 ```
 
+#Interpretation: ETS Forecasting Results
+
+Two exponential smoothing specifications were evaluated using the 2025 testing period: an additive ETS model and an automatically selected ETS model.
+
+The results indicate that the automatic ETS model achieved better forecasting performance across all three reported accuracy measures. ETS Automatic produced an RMSE of 28.77, an MAE of 23.33, and a MAPE of approximately 10.05%. In comparison, ETS Additive produced an RMSE of 40.88, an MAE of 34.02, and a MAPE of approximately 14.03%.
+
+The automatic ETS model reduced RMSE by approximately 29.6% relative to the additive specification. This suggests that the automatically selected exponential smoothing structure represents the underlying collision patterns more effectively than the specified additive model.
+
+The information criteria also support this finding. ETS Automatic recorded lower AIC, AICc, and BIC values, indicating a preferable model specification according to these criteria.
+
+Overall, ETS Automatic is the stronger forecasting model among the two exponential smoothing specifications evaluated. However, its performance must also be compared with the Seasonal Naïve, ARIMA, ARIMAX, and TSLM models before selecting the final forecasting model.
+
+
+```{r}
+accuracy(ets_fc, test)
+```
+#Additional Interpretation of ETS Forecast Accuracy
+
+Further evaluation of the ETS models indicates that ETS Automatic outperformed ETS Additive across the reported forecast accuracy measures.
+
+ETS Automatic produced a mean error of 8.00, compared with 25.70 for ETS Additive, suggesting that the automatic specification had less systematic forecast bias. Its mean percentage error was also lower, at 1.92%, compared with 9.47% for the additive model.
+
+The first-order autocorrelation of forecast errors was 0.385 for ETS Automatic and 0.536 for ETS Additive. Although the automatic model reduced residual autocorrelation, the positive values suggest that some temporal dependence remains unexplained.
+
+The MASE and RMSSE measures returned undefined values (NaN) and therefore cannot be used for this comparison without further investigation.
+
+Overall, ETS Automatic provides better out-of-sample forecasting performance than ETS Additive. However, the remaining autocorrelation suggests that models incorporating additional temporal dependencies, such as ARIMA and ARIMAX, should also be evaluated.
+
+```{r}
+# Check training observations
+summary(train$crashes)
+
+# Check whether any training values are zero
+sum(train$crashes == 0)
+
+# Check seasonal naive scaling
+mean(
+  abs(
+    train$crashes[-(1:7)] -
+    train$crashes[1:(nrow(train)-7)]
+  ),
+  na.rm = TRUE
+)
+```
+
+```{r}
+# Calculate weekly seasonal naive scaling factor
+mase_scale <- mean(
+  abs(
+    train$crashes[-(1:7)] -
+    train$crashes[1:(nrow(train)-7)]
+  )
+)
+
+# Calculate ETS accuracy
+ets_accuracy <- accuracy(
+  ets_fc,
+  test
+) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
+  select(
+    .model,
+    RMSE,
+    MAE,
+    MAPE,
+    MASE,
+    ACF1
+  ) |>
+  arrange(RMSE)
+
+ets_accuracy
+```
+
+#ETS Model Comparison and Forecast Accuracy
+
+The exponential smoothing models were evaluated using the 2025 testing period. The results demonstrate that ETS Automatic outperformed ETS Additive across all five reported accuracy measures.
+
+ETS Automatic achieved an RMSE of 28.77 and an MAE of 23.33, compared with 40.88 and 34.02, respectively, for ETS Additive. Its MAPE was approximately 10.05%, while the additive model recorded approximately 14.03%.
+
+The manually calculated MASE values were 0.4101 for ETS Automatic and 0.5980 for ETS Additive. Both values were below one, indicating better forecasting performance than the weekly seasonal-naïve training benchmark.
+
+Furthermore, ETS Automatic recorded a lower first-order autocorrelation value (ACF1 = 0.3851) than ETS Additive (ACF1 = 0.5357). Nevertheless, the remaining positive autocorrelation suggests that additional temporal structure may not have been fully captured.
+
+Overall, ETS Automatic provides the more accurate forecasting specification among the two exponential smoothing models. Its performance will be compared with ARIMA, ARIMAX, and TSLM models to identify the strongest forecasting approach for NYC daily motor vehicle collisions.
 #7. ARIMA Forecasting
 ARIMA models capture temporal dependence through autoregressive, differencing, and moving-average components.
 
@@ -412,6 +560,42 @@ tidy(arima_auto)
 
 Automatic ARIMA selection identifies a suitable model based on the training data.
 
+```{r}
+arima_fc <- arima_auto |>
+  forecast(new_data = test)
+
+arima_accuracy <- accuracy(
+  arima_fc,
+  test
+) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
+  select(
+    .model,
+    RMSE,
+    MAE,
+    MAPE,
+    MASE,
+    ACF1
+  )
+
+arima_accuracy
+```
+#Interpretation: Automatic ARIMA Forecasting Results
+
+The automatic ARIMA model was estimated using the training observations from July 2012 through December 2024 and evaluated using the 2025 testing period.
+
+The fitted model incorporated autoregressive, moving-average, and seasonal moving-average components. The estimated coefficients indicate that the model captures several forms of temporal dependence within the daily collision series.
+
+The forecasting evaluation produced an RMSE of 29.59, an MAE of 23.48, a MAPE of approximately 10.51%, and a MASE of 0.4128.
+
+When compared with ETS Automatic, the ARIMA model produced slightly higher RMSE, MAE, MAPE, and MASE values. Therefore, ETS Automatic demonstrated marginally better forecasting accuracy during the 2025 testing period.
+
+However, ARIMA Automatic recorded a lower first-order autocorrelation value (ACF1 = 0.3509) than ETS Automatic (ACF1 = 0.3851). This suggests that ARIMA captured some short-term temporal dependence more effectively, although positive residual autocorrelation remains.
+
+Overall, both models provide useful forecasting benchmarks. ETS Automatic currently has the stronger out-of-sample accuracy, but the ARIMAX and TSLM models must also be evaluated before selecting the final forecasting model.
+
 #7.2 ARIMA Residual Diagnostics
 
 ```{r}
@@ -426,13 +610,21 @@ arima_auto |>
     .innov,
     ljung_box,
     lag = 14,
-    dof = 0
+    dof = 6
   )
 ```
 
-The Ljung-Box test evaluates whether residual autocorrelation remains. A small p-value suggests that the residuals contain additional temporal structure.
+#Interpretation: ARIMA Residual Diagnostics
 
-The degrees of freedom should be adjusted to reflect the estimated ARMA parameters when conducting the formal model-specific test. The value above is a conservative initial diagnostic, not a universal degrees-of-freedom choice.
+The Ljung-Box test was conducted to determine whether significant autocorrelation remained in the residuals of the automatic ARIMA model.
+
+The test produced a Ljung-Box statistic of 237.58 and a p-value below 0.001. At the 5% significance level, the null hypothesis of no residual autocorrelation is rejected.
+
+This indicates that the automatic ARIMA model has not fully captured the temporal dependence present in the daily motor vehicle collision series.
+
+Although the model achieved reasonable out-of-sample forecasting accuracy, the diagnostic results suggest that additional temporal patterns remain unexplained. This limitation supports evaluating alternative specifications, particularly ARIMAX models incorporating weekday indicators, long-term trends, and annual Fourier terms.
+
+Overall, the ARIMA model provides a useful forecasting benchmark, but its residual diagnostics indicate that further model improvement may be possible.
 
 #7.3 ARIMA Forecasts
 ```{r}
@@ -458,12 +650,16 @@ arima_accuracy <- accuracy(
   arima_fc,
   test
 ) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
   select(
     .model,
     RMSE,
     MAE,
     MAPE,
-    MASE
+    MASE,
+    ACF1
   )
 
 arima_accuracy
@@ -512,6 +708,12 @@ report(arimax_model)
 
 tidy(arimax_model)
 ```
+
+```{r}
+arimax_fc <- arimax_model |>
+  forecast(new_data = test_x)
+```
+
 #8.3 ARIMAX Residual Diagnostics
 
 ```{r}
@@ -530,7 +732,17 @@ arimax_model |>
   )
 ```
 
-As with the automatic ARIMA model, the degrees of freedom should be refined using the fitted ARIMA error structure.
+#Interpretation: ARIMAX Residual Diagnostics
+
+The Ljung-Box test was conducted to evaluate whether significant autocorrelation remained in the residuals of the ARIMAX forecasting model.
+
+The test produced a Ljung-Box statistic of 193.01 with a p-value below 0.001. At the 5% significance level, the null hypothesis of no residual autocorrelation is rejected.
+
+This indicates that the ARIMAX model has not fully captured all temporal dependencies in the daily motor vehicle collision series.
+
+Compared with the automatic ARIMA model, the ARIMAX model produced a lower Ljung-Box statistic. This may suggest that incorporating trend, weekday indicators, and annual Fourier terms accounts for some additional temporal structure. However, the remaining statistically significant autocorrelation indicates that further improvement may be possible.
+
+Overall, the residual diagnostics suggest that the explanatory variables provide additional modeling information, but they do not eliminate all remaining temporal dependence.
 
 #8.4 ARIMAX Forecasts
 
@@ -556,16 +768,33 @@ arimax_accuracy <- accuracy(
   arimax_fc,
   test
 ) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
   select(
     .model,
     RMSE,
     MAE,
     MAPE,
-    MASE
+    MASE,
+    ACF1
   )
 
 arimax_accuracy
 ```
+#Interpretation: ARIMAX Forecasting Results
+
+The ARIMAX model was evaluated using the 2025 testing period to determine whether incorporating explanatory variables improved forecasting performance.
+
+The model achieved an RMSE of 37.62, an MAE of 29.83, a MAPE of approximately 13.23%, and a MASE of 0.5244.
+
+Compared with ETS Automatic and ARIMA Automatic, ARIMAX produced higher forecasting errors across all four accuracy measures. This indicates that incorporating a linear trend, weekday indicators, and annual Fourier terms did not improve out-of-sample forecasting accuracy during the evaluation period.
+
+However, ARIMAX recorded an ACF1 value of 0.2762, which was lower than the corresponding values for ETS Automatic (0.3851) and ARIMA Automatic (0.3509). This suggests that the ARIMAX forecast errors exhibited less first-order autocorrelation.
+
+These findings demonstrate that improvements in residual dependence do not necessarily result in better forecasting accuracy.
+
+Overall, ARIMAX provides a useful comparison model, but ETS Automatic currently demonstrates the strongest out-of-sample forecasting performance among the three models evaluated.
 
 #9. TSLM Forecasting Models
 Time Series Linear Models provide an interpretable approach to modeling temporal trends and seasonal patterns.
@@ -614,10 +843,35 @@ autoplot(
 accuracy_trend <- accuracy(
   forecast_trend,
   test
-)
+) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
+  select(
+    .model,
+    RMSE,
+    MAE,
+    MAPE,
+    MASE,
+    ACF1
+  )
 
 accuracy_trend
 ```
+#Interpretation: Trend-Only TSLM Forecasting Results
+
+The Trend-Only Time Series Linear Model was developed to examine the relationship between time and daily motor vehicle collision frequency in New York City.
+
+The model achieved an RMSE of 33.88, an MAE of 27.06, a MAPE of approximately 12.04%, and a MASE of 0.4757 during the 2025 testing period.
+
+When compared with the previously evaluated models, Trend-Only TSLM outperformed ARIMAX but produced higher forecasting errors than ETS Automatic and ARIMA Automatic.
+
+The model also recorded an ACF1 value of 0.5053, indicating substantial positive first-order autocorrelation in its forecast errors. This suggests that a linear time trend alone does not adequately capture all temporal patterns in daily collision frequency.
+
+These findings support extending the TSLM specification by incorporating weekday indicators and annual seasonal components.
+
+Overall, the Trend-Only model provides a useful baseline for evaluating whether additional seasonal explanatory variables improve forecasting performance.
+
 #9.2 Trend and Weekly Seasonality Model
 The second specification incorporates weekday indicators to capture differences in collision frequency across the seven days of the week.
 
@@ -660,11 +914,34 @@ autoplot(
 accuracy_seasonal <- accuracy(
   forecast_seasonal,
   test
-)
+) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
+  select(
+    .model,
+    RMSE,
+    MAE,
+    MAPE,
+    MASE,
+    ACF1
+  )
 
 accuracy_seasonal
 ```
+#Interpretation: Trend and Weekly Seasonality TSLM
 
+The second TSLM specification incorporated a linear trend and weekday indicators to capture recurring differences in daily motor vehicle collision frequency across the seven days of the week.
+
+The model achieved an RMSE of 41.99, an MAE of 33.93, a MAPE of approximately 15.12%, and a MASE of 0.5964 during the 2025 testing period.
+
+Compared with the Trend-Only TSLM model, the inclusion of weekday indicators resulted in higher forecasting errors across all four accuracy measures. RMSE increased from 33.88 to 41.99, indicating that the additional explanatory variables did not improve out-of-sample forecasting performance.
+
+Although the exploratory analysis identified differences in average collision frequency across weekdays, these historical patterns did not translate into improved forecasts during the testing period.
+
+The model recorded an ACF1 value of 0.4156, which was lower than the Trend-Only model's value of 0.5053. This suggests a reduction in first-order residual autocorrelation, although substantial temporal dependence remains.
+
+Overall, the results demonstrate that including explanatory variables does not necessarily improve forecasting accuracy. The full TSLM specification will be evaluated next to determine whether incorporating annual Fourier terms provides additional forecasting benefits.
 #9.3 Full TSLM: Trend, Weekly and Annual Seasonality
 The third model incorporates both weekday indicators and annual Fourier terms.
 
@@ -713,10 +990,33 @@ autoplot(
 accuracy_tslm_full <- accuracy(
   forecast_tslm_full,
   test
-)
+) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
+  select(
+    .model,
+    RMSE,
+    MAE,
+    MAPE,
+    MASE,
+    ACF1
+  )
 
 accuracy_tslm_full
 ```
+
+#Interpretation: Full TSLM Forecasting Results
+
+The full Time Series Linear Model incorporated a linear trend, weekday indicators, and annual Fourier terms to capture long-term changes and recurring seasonal patterns in daily motor vehicle collision frequency.
+
+The model achieved an RMSE of 38.47, an MAE of 30.15, a MAPE of approximately 13.38%, and a MASE of 0.5299 during the 2025 testing period.
+
+Compared with the other TSLM specifications, the full model outperformed Trend-Weekly TSLM but did not outperform Trend-Only TSLM. This indicates that incorporating annual Fourier terms improved forecasting accuracy relative to the weekly specification, but the additional seasonal components did not produce an overall improvement compared with the simpler trend-only model.
+
+The full TSLM recorded an ACF1 value of 0.3082, indicating lower first-order forecast-error autocorrelation than the other two TSLM specifications.
+
+Overall, the findings suggest that a simpler linear trend specification provided more accurate forecasts than the more complex TSLM alternatives during the 2025 evaluation period. This demonstrates that additional explanatory variables do not necessarily improve out-of-sample forecasting performance.
 
 #10. Model Comparison
 All forecasting models are evaluated using the same testing period. This provides a consistent basis for comparing their predictive performance.
@@ -777,6 +1077,9 @@ final_accuracy <- accuracy(
   fc,
   test
 ) |>
+  mutate(
+    MASE = MAE / mase_scale
+  ) |>
   select(
     .model,
     RMSE,
@@ -804,7 +1107,19 @@ best_model <- final_accuracy |>
 best_model
 ```
 
-Model selection should consider forecast accuracy alongside residual diagnostics and model interpretability.
+#10.4 Identification of the Best Forecasting Model
+
+The forecasting performance of six statistical models was evaluated using the 2025 testing period. Model performance was assessed using Root Mean Squared Error (RMSE), Mean Absolute Error (MAE), Mean Absolute Percentage Error (MAPE), Mean Absolute Scaled Error (MASE), and first-order residual autocorrelation (ACF1).
+
+The ETS Automatic model achieved the best overall forecasting performance, recording the lowest RMSE of 28.77, MAE of 23.33, MAPE of 10.05%, and MASE of 0.4101.
+
+The ARIMA Automatic model ranked second, with an RMSE of 29.59 and an MAE of 23.48. Its forecasting performance was relatively close to that of ETS Automatic.
+
+The ARIMAX and Full TSLM models produced higher forecasting errors, indicating that incorporating explanatory variables and seasonal components did not improve predictive accuracy during the testing period. ETS Additive and Seasonal Naïve also demonstrated weaker forecasting performance.
+
+Although Seasonal Naïve recorded the lowest ACF1 value of 0.1427, it produced the highest RMSE of 46.56. This demonstrates that residual autocorrelation and forecasting accuracy measure different aspects of model performance.
+
+Overall, ETS Automatic was selected as the best forecasting model because it consistently achieved the lowest errors across the four principal accuracy measures. These results suggest that the automatically selected exponential smoothing structure captured the historical patterns in daily NYC motor vehicle collisions more effectively than the alternative specifications during the 2025 evaluation period.
 
 #10.5 Plot Forecast Comparisons
 ```{r}
@@ -829,13 +1144,49 @@ glance(fit_trend_seasonal)
 glance(fit_tslm_full)
 ```
 
-Use the actual R-squared values returned above when preparing the final presentation.
+#Interpretation: Full TSLM Model Explanatory Power
+
+The Full Time Series Linear Model achieved an R-squared value of 0.5681 and an adjusted R-squared value of 0.5665.
+
+This indicates that approximately 56.81% of the variation in daily motor vehicle collision frequency is explained by the model's explanatory variables, including the linear trend, weekday indicators, and annual Fourier terms.
+
+The adjusted R-squared value of 0.5665 is slightly lower than the unadjusted R-squared, reflecting an adjustment for the number of explanatory variables included in the model.
+
+The model also produced an F-statistic of 352.02 with a p-value below 0.001, indicating that the explanatory variables are jointly statistically significant under the fitted regression model.
+
+Overall, the results suggest that trend and seasonal explanatory variables provide meaningful information about historical collision frequency. However, the R-squared value represents in-sample explanatory power and should not be interpreted as evidence of forecasting accuracy. The 2025 testing results remain the primary basis for evaluating predictive performance.
+
+```{r}
+library(fpp3)
+
+glance(fit_trend) |>
+  select(.model, r_squared, adj_r_squared)
+
+glance(fit_trend_seasonal) |>
+  select(.model, r_squared, adj_r_squared)
+
+glance(fit_tslm_full) |>
+  select(.model, r_squared, adj_r_squared)
+```
+
+#11. TSLM Model Explanatory Power
+
+The explanatory power of the three Time Series Linear Model specifications was evaluated using R-squared and adjusted R-squared.
+
+The Trend-Only model achieved an R-squared of 0.5074 and an adjusted R-squared of 0.5073, indicating that approximately 50.74% of the variation in daily motor vehicle collision frequency was explained by the linear time trend.
+
+The Trend-Weekly model achieved an R-squared of 0.5523 and an adjusted R-squared of 0.5516. The increase in explanatory power suggests that weekday indicators provide additional information about recurring differences in collision frequency across the seven days of the week.
+
+The Full TSLM model achieved the highest explanatory power, with an R-squared of 0.5681 and an adjusted R-squared of 0.5665. This specification incorporated a linear trend, weekday indicators, and annual Fourier terms. The results suggest that annual seasonal components provide additional explanatory information beyond the trend and weekly effects.
+
+Overall, the Full TSLM model explains approximately 56.81% of the historical variation in daily collision frequency. However, despite having the highest R-squared, it did not achieve the best out-of-sample forecasting accuracy. The Trend-Only model also performed better than the more complex TSLM specifications during the 2025 testing period.
+
+These findings demonstrate that explanatory power and forecasting accuracy measure different aspects of model performance. Consequently, out-of-sample forecasting accuracy remains the primary criterion for selecting the best forecasting model.
 
 #12. Road-User Injury Analysis
 In addition to collision frequency, the original dataset contains injury information for pedestrians, cyclists, and motor vehicle occupants.
 
 The following section aggregates daily injury counts separately for each road-user group.
-
 ```{r}
 road_user_daily <- crashes |>
   group_by(day) |>
@@ -856,7 +1207,34 @@ road_user_daily <- crashes |>
   )
 ```
 
-If your CSV uses different injury column names, replace them with the exact names returned by names(crashes).
+```{r}
+road_user_summary <- road_user_daily |>
+  summarise(
+    Pedestrians = sum(ped_injured, na.rm = TRUE),
+    Cyclists = sum(cyc_injured, na.rm = TRUE),
+    Motorists = sum(mot_injured, na.rm = TRUE)
+  ) |>
+  pivot_longer(
+    everything(),
+    names_to = "Road_User",
+    values_to = "Total_Injuries"
+  ) |>
+  arrange(desc(Total_Injuries))
+
+road_user_summary
+```
+
+#Interpretation: Road-User Injury Analysis
+
+The road-user injury analysis examined the distribution of traffic-related injuries among motor vehicle occupants, pedestrians, and cyclists in New York City.
+
+The results identified 553,385 injuries among motor vehicle occupants, representing approximately 72.45% of the combined injuries across the three categories. Pedestrians accounted for 141,606 injuries (18.54%), while cyclists accounted for 68,863 injuries (9.01%).
+
+Motor vehicle occupants represented the largest share of reported injuries, followed by pedestrians and cyclists.
+
+These findings provide additional insight into the distribution of traffic-related injuries across different road-user groups. They also demonstrate that collision frequency and injury frequency represent different dimensions of traffic safety and should be evaluated separately.
+
+Overall, the findings highlight the importance of considering the safety of all road users when examining motor vehicle collisions in New York City.
 
 #12.1 Road-User Injury Time Series
 
@@ -1015,28 +1393,24 @@ list.files(
 ```
 
 #14. Conclusion
-This analysis examines daily motor vehicle collisions in New York City using historical observations beginning in 2012. The forecasting framework evaluates several statistical approaches, including Seasonal Naïve, ETS, ARIMA, ARIMAX, and TSLM.
 
-The TSLM specifications progressively incorporate a linear trend, weekday indicators, and annual Fourier terms. This allows the analysis to examine the contribution of long-term changes and recurring seasonal patterns to daily collision frequency.
+This project examined daily motor vehicle collisions in New York City using historical data from July 2012 through December 2025. The primary objective was to identify long-term trends, weekly and annual seasonal patterns, and changes in collision frequency while evaluating the forecasting performance of several statistical models.
 
-Forecast performance is assessed using the 2025 testing period, with RMSE, MAE, MAPE, and MASE providing measures of predictive accuracy. Residual diagnostics are also used to examine whether temporal dependence remains unexplained.
+The exploratory analysis identified meaningful differences in collision frequency across the days of the week. Fridays recorded the highest average daily collision count at 524.2, while Sundays recorded the lowest at 393.4. The weekday-versus-weekend comparison also showed higher average daily collisions on weekdays (490.09) than on weekends (420.34). These findings suggest that weekly travel patterns are associated with differences in daily collision frequency.
 
-The final model selection should be based on the actual out-of-sample accuracy results and residual behavior rather than in-sample R-squared alone.
+Stationarity testing using the KPSS test produced a test statistic of 28.927 and a p-value of 0.01, providing evidence against the null hypothesis of stationarity. This finding supports the use of appropriate time-series modeling techniques to account for temporal patterns and changes in the series.
 
-The road-user injury analysis provides an additional perspective by examining differences in injury patterns among pedestrians, cyclists, and motor vehicle occupants.
+Six forecasting models were evaluated using a chronological training and testing design. Historical observations through December 2024 were used for model estimation, while the 2025 observations were reserved for out-of-sample evaluation.
 
-Overall, the project provides a structured framework for understanding historical collision patterns and evaluating statistical forecasting approaches. The findings may help inform further research into urban traffic safety, temporal collision patterns, and the distribution of traffic-related injuries.
+Among the six forecasting specifications, ETS Automatic achieved the best overall forecasting performance, recording an RMSE of 28.77, an MAE of 23.33, a MAPE of 10.05%, and a MASE of 0.4101. ARIMA Automatic ranked second, with an RMSE of 29.59 and an MAE of 23.48. The results indicate that ETS Automatic provided the most accurate forecasts during the 2025 testing period.
 
-6. Important things to check before knitting
-There are four things I particularly want you to verify.
+The TSLM analysis also provided insight into the explanatory contribution of trend and seasonal variables. The Trend-Only model achieved an R-squared of 0.5074, the Trend-Weekly model achieved 0.5523, and the Full TSLM model achieved 0.5681. These results indicate that incorporating weekday indicators and annual Fourier terms increased the proportion of historical variation explained by the models. However, the Full TSLM model did not produce the best out-of-sample forecasting accuracy. This demonstrates that greater explanatory power does not necessarily translate into better predictive performance.
 
-1. Dataset column names: Run names(crashes) to confirm the three injury columns in Section 12. NYC's dataset uses specific field names, and these must match exactly.
+The road-user injury analysis provided an additional perspective on traffic safety. Motor vehicle occupants accounted for 553,385 reported injuries, followed by pedestrians with 141,606 and cyclists with 68,863. These findings demonstrate differences in the distribution of reported injuries across road-user categories and emphasize the importance of considering multiple groups when evaluating urban traffic safety.
 
-2. ETS seasonality: Check the model reports to confirm the seasonal structure selected for daily observations. Your data have a weekly cycle, so a seven-day seasonal pattern is particularly important.
+Overall, the project demonstrates the value of time-series analysis in understanding historical collision patterns and evaluating alternative forecasting approaches. ETS Automatic emerged as the strongest forecasting model based on the 2025 testing results, while the TSLM analysis provided useful insight into the contribution of long-term trends and seasonal patterns.
 
-3. MAPE: Daily collision counts should be positive for ordinary MAPE interpretation. If any actual testing observations are zero, MAPE can be undefined or misleading. MAE and RMSE remain useful.
-
-4. ARIMA computation: Automatic ARIMA estimation on more than 4,500 daily observations can take time. Start with the default automatic selection before trying exhaustive model searches.
+The findings provide a statistical foundation for further research into urban traffic patterns, collision forecasting, and road-user safety in New York City.
 
 
 
